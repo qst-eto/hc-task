@@ -1,0 +1,6 @@
+WIN11 
+OpenSSHの追加
+fire wallでport22の解放
+power shellを管理者権限で Start-Service sshd
+(Get-Service sshdで確認)
+
