@@ -9,6 +9,7 @@ dt=datetime.now()
 datetime_str=dt.strftime("%Y-%m-%d")
 pass_name="location=/home/user/Desktop/homecage-task/logs/"+datetime_str+"_video.mp4"
 
+rec_mode=0
 
 # フラグ
 transfer_done = False
@@ -28,7 +29,11 @@ gst_command = [
     "!", "filesink", pass_name, "sync=true"
 ]
 
-recording = subprocess.Popen(gst_command)
+
+if rec_mode==1:
+
+	recording = subprocess.Popen(gst_command)
+
 
 #------------------------------
 
@@ -45,8 +50,9 @@ subprocess.run(['python', script_name] + script_args)
 #実験スクリプト終了-----------------
 
 
-recording.send_signal(signal.SIGINT)
-recording.wait()
+if rec_mode==1:
+	recording.send_signal(signal.SIGINT)
+	recording.wait()
 
 
 #OC script----------------------
