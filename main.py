@@ -9,11 +9,10 @@ dt=datetime.now()
 datetime_str=dt.strftime("%Y-%m-%d")
 pass_name="location=/home/user/Desktop/homecage-task/logs/"+datetime_str+"_video.mp4"
 
-rec_mode=False
-
 # フラグ
 transfer_done = False
-sd_mode=False
+sd_mode=False #シャットダウンモード
+rec_mode=False #録画
 
 #第一引数に実行スクリプトを入力
 
@@ -86,6 +85,16 @@ threading.Thread(target=run_scp, daemon=True).start()
 running = True
 while running:
     for event in pygame.event.get():
+
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_s: #Sキーを入力するとSDmodeをオンにする
+            sd_mode=True
+            screen.fill((0, 0, 0))
+            font = pygame.font.SysFont(None, 60)
+            text = font.render("sd_mode", True, (255, 255, 255))
+            text_rect = text.get_rect(center=(info.current_w // 2, info.current_h // 2))
+            screen.blit(text, text_rect)
+            pygame.display.update()
+		
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             running = False  # ESCで終了
         elif event.type in [pygame.MOUSEBUTTONDOWN, pygame.KEYDOWN]:
@@ -103,6 +112,7 @@ subprocess.run(["python", "./code/file_move.py"])
 
 if sd_mode=True:
 	subprocess.run(["sudo", "shutdown", "-h", "now"])
+
 
 
 
