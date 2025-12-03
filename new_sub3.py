@@ -101,7 +101,9 @@ while running:
 
 pygame.quit()
 
+subprocess.run(["python", "./code/file_move.py"])
 
 if sd_mode=True:
 	subprocess.run(["sudo", "shutdown", "-h", "now"])
+
 
