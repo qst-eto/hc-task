@@ -4,6 +4,7 @@ import threading
 import sys
 import signal
 from datetime import datetime
+import keyboard
 
 dt=datetime.now()
 datetime_str=dt.strftime("%Y-%m-%d")
@@ -13,6 +14,7 @@ rec_mode=0
 
 # フラグ
 transfer_done = False
+sd_mode=False
 
 #第一引数に実行スクリプトを入力
 
@@ -58,10 +60,11 @@ if rec_mode==1:
 #OC script----------------------
 
 def run_scp():
-    global transfer_done
+    global transfer_done,sd_mode
+	if keyboard.is_pressed('s'):
+		sd_mode=True
     subprocess.run(["python", "./code/pi2win.py"])
     import time
-    time.sleep(5)  # ダミー転送時間
     transfer_done = True  # 転送完了を通知
 
 # --- Pygame 初期化 ---
@@ -98,4 +101,7 @@ while running:
 
 pygame.quit()
 
-subprocess.run(["sudo", "shutdown", "-h", "now"])
+
+if sd_mode=True:
+	subprocess.run(["sudo", "shutdown", "-h", "now"])
+
