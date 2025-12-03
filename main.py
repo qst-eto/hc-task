@@ -4,13 +4,12 @@ import threading
 import sys
 import signal
 from datetime import datetime
-import keyboard
 
 dt=datetime.now()
 datetime_str=dt.strftime("%Y-%m-%d")
 pass_name="location=/home/user/Desktop/homecage-task/logs/"+datetime_str+"_video.mp4"
 
-rec_mode=0
+rec_mode=False
 
 # フラグ
 transfer_done = False
@@ -32,7 +31,7 @@ gst_command = [
 ]
 
 
-if rec_mode==1:
+if rec_mode==True:
 
 	recording = subprocess.Popen(gst_command)
 
@@ -52,7 +51,7 @@ subprocess.run(['python', script_name] + script_args)
 #実験スクリプト終了-----------------
 
 
-if rec_mode==1:
+if rec_mode==True:
 	recording.send_signal(signal.SIGINT)
 	recording.wait()
 
@@ -61,8 +60,7 @@ if rec_mode==1:
 
 def run_scp():
     global transfer_done,sd_mode
-	if keyboard.is_pressed('s'):
-		sd_mode=True
+
     subprocess.run(["python", "./code/pi2win.py"])
     import time
     transfer_done = True  # 転送完了を通知
@@ -105,5 +103,6 @@ subprocess.run(["python", "./code/file_move.py"])
 
 if sd_mode=True:
 	subprocess.run(["sudo", "shutdown", "-h", "now"])
+
 
 
