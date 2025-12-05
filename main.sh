@@ -1,3 +1,4 @@
 conda activate rpi-arduino
 cd homecage-task
-python ./code/main.py --
+ARGS=$(cat pre_arg.txt)
+python ./code/main.py $ARGS
