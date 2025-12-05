@@ -37,6 +37,12 @@ if rec_mode==True:
 
 #------------------------------
 
+#-----pre_arg test
+with open('pre_arg.txt','w') as f:
+	for i in sys.argv:
+		print(i, end=' ', file=f)
+------------------
+
 args=sys.argv[1:]
 
 script_name = args[0]
@@ -112,6 +118,7 @@ subprocess.run(["python", "./code/file_move.py"])
 
 if sd_mode=True:
 	subprocess.run(["sudo", "shutdown", "-h", "now"])
+
 
 
 
