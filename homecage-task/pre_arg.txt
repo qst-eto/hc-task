@@ -1,0 +1,1 @@
+./code/main.py ./code/touch_rect_step2.py --serial-port /dev/tty --rect-mode square_custom --square-px 200 --min-side-px 1 --fullscreen --iti-min-ms 1000 --iti-max-ms 5000 --info --min-side-px 150 --wait-release-timeout-ms 2000 --max-outside-before-fail 5 
