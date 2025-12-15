@@ -12,7 +12,7 @@ pass_name="location=/home/user/Desktop/homecage-task/logs/"+datetime_str+"_video
 # フラグ
 transfer_done = False
 sd_mode=False #シャットダウンモード
-rec_mode=False #録画
+rec_mode=2 #録画
 
 #第一引数に実行スクリプトを入力
 
@@ -29,13 +29,27 @@ gst_command = [
     "!", "filesink", pass_name, "sync=true"
 ]
 
+#映像転送のみ------------------
+video_command = [
+    "gst-launch-1.0", "v4l2src device=/dev/video0", "!",
+    "videoconvert", "!",
+    "x264enc", "tune=zerolatency", "bitrate=500", "speed-preset=superfast", "!",
+    "rtph264pay" "!"
+    "udpsink", "host=hc-task02.local", "port=5000"
+]
 
-if rec_mode==True:
+#------------------------------
+
+
+if rec_mode==1:
 
 	recording = subprocess.Popen(gst_command)
 
+elif rec_mode==2:
+	recording = subprocess.Popen(video_command)
 
-#------------------------------
+
+
 
 #-----pre_arg test
 with open('pre_arg.txt','w') as f:
@@ -56,7 +70,7 @@ subprocess.run(['python', script_name] + script_args)
 #実験スクリプト終了-----------------
 
 
-if rec_mode==True:
+if rec_mode!=0:
 	recording.send_signal(signal.SIGINT)
 	recording.wait()
 
