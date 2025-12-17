@@ -31,7 +31,7 @@ gst_command = [
 
 #映像転送のみ------------------
 video_command = [
-    "gst-launch-1.0", "v4l2src device=/dev/video0", "!",
+    "gst-launch-1.0", "v4l2src", "device=/dev/video0", "!",
     "videoconvert", "!",
     "x264enc", "tune=zerolatency", "bitrate=500", "speed-preset=superfast", "!",
     "rtph264pay" "!"
