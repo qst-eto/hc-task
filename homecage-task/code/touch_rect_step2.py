@@ -123,7 +123,7 @@ def run(args):
         active_fingers = set()
         outside_touches_in_trial = 0  # New: 試行内カウンタ
 
-        ttl = ArduinoTTLSender(args.serial_port, args.serial_baud)
+        #ttl = ArduinoTTLSender(args.serial_port, args.serial_baud)
         beep = make_beep_sound(args.beep_freq, args.beep_ms, args.beep_volume)
 
         logs = []
@@ -218,11 +218,11 @@ def run(args):
                         if rect.collidepoint((x, y)):
                             # 成功（矩形内）→ TTL/ビープ、ITIへ
                             ok = True
-                            try:
-                                ttl.pulse()
-                            except Exception as e:
-                                print(f"[ERROR] TTL 失敗: {e}", file=sys.stderr)
-                                ok = False
+                            #try:
+                            #    ttl.pulse()
+                            #except Exception as e:
+                            #    print(f"[ERROR] TTL 失敗: {e}", file=sys.stderr)
+                            #    ok = False
                             try:
                                 beep.play()
                             except Exception:

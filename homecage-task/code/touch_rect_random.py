@@ -116,7 +116,7 @@ def run(args):
         mouse_down = False
         active_fingers = set()
 
-        ttl = ArduinoTTLSender(args.serial_port, args.serial_baud)
+        #ttl = ArduinoTTLSender(args.serial_port, args.serial_baud)
         beep = make_beep_sound(args.beep_freq, args.beep_ms, args.beep_volume)
 
         logs = []
