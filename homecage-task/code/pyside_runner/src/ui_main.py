@@ -2,10 +2,12 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 import sys
+import shlex
+import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from PySide6.QtCore import Qt, QProcess, QStandardPaths
+from PySide6.QtCore import Qt, QProcess, QStandardPaths, QSettings
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QFileDialog, QMessageBox, QSizePolicy,
@@ -14,27 +16,37 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QCheckBox, QPlainTextEdit, QSpinBox, QDoubleSpinBox
 )
 
-# --- 外部関数の読み込み（モジュール名はあなたの環境に合わせて変更してください） ---
-# 例: ops.py に関数が定義されている想定
+# --- 外部関数の読み込み（あなたのモジュール名に合わせて変更してください） ---
 try:
     from ops import rec_standby, rec_start, video_start, rec_end, touch_disable, shut_down
 except Exception:
-    # 開発・テスト用のダミー（本番は必ず正しいモジュールに差し替え）
+    # 開発・テスト用スタブ（本番は正しいモジュールに差し替え）
     def rec_standby(): print("[stub] rec_standby")
     def rec_start(): print("[stub] rec_start")
     def video_start(): print("[stub] video_start")
+    def rec_end(): print("[stub] rec_end")
     def touch_disable(): print("[stub] touch_disable")
     def shut_down(): print("[stub] shut_down")
 
+# AST解析ユーティリティ（parse_args()から引数定義を取得）
 from argparse_ast import extract_args_from_source, ARG_TYPES
 
 APP_NAME = 'PyScriptRunner'
+ORG_NAME = 'EtoHayato'  # QSettingsの識別用。必要なら変更
+
+
+# ---ホイール無効コンボボックス ---
+class NoWheelComboBox(QComboBox):
+    def wheelEvent(self, event):
+        # マウスホイールによる項目変更を完全に無効化
+        event.ignore()
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('Pythonスクリプト ランチャー（PySide6）')
-        self.resize(1000, 680)
+        self.resize(1080, 700)
 
         # 状態
         self.current_folder: Path = Path.home()
@@ -58,17 +70,16 @@ class MainWindow(QMainWindow):
         folder_layout.addWidget(self.btn_refresh)
 
         script_layout = QHBoxLayout()
-        self.cb_script = QComboBox()
+        self.cb_script = NoWheelComboBox()
         script_layout.addWidget(QLabel('スクリプト:'))
         script_layout.addWidget(self.cb_script, stretch=1)
 
         root.addLayout(folder_layout)
         root.addLayout(script_layout)
 
-
-        # --- 追加: モード設定（ビデオモード／転送モード／シャットダウンモード） ---
+        # --- モード設定（ビデオモード／転送モード／シャットダウンモード） ---
         modes_layout = QHBoxLayout()
-        self.cb_video_mode = QComboBox()
+        self.cb_video_mode = NoWheelComboBox()
         self.cb_video_mode.addItems(['録画', '映像', 'なし'])
         self.cb_video_mode.setCurrentText('なし')
 
@@ -84,11 +95,27 @@ class MainWindow(QMainWindow):
 
         root.addLayout(modes_layout)
 
+        # === 貼り付け入力欄（新規） ===
+        paste_layout = QHBoxLayout()
+        self.paste_input = QPlainTextEdit()
+        self.paste_input.setPlaceholderText(
+            "ここにコマンドラインを貼り付けてください（例）\n"
+            "python /path/to/script.py --window-w 1280 --rect-rgb 0 160 255 input.txt"
+        )
+        self.paste_input.setMaximumHeight(100)
+        self.btn_import_text = QPushButton('貼り付け→引数読み込み')
+        self.btn_import_clip = QPushButton('クリップボードから読み込み')
+
+        paste_layout.addWidget(QLabel("貼り付け入力:"))
+        paste_layout.addWidget(self.paste_input, stretch=1)
+        paste_layout.addWidget(self.btn_import_text)
+        paste_layout.addWidget(self.btn_import_clip)
+        root.addLayout(paste_layout)
 
         # 引数テーブル＋ボタン帯
         args_layout = QVBoxLayout()
         self.tbl_args = QTableWidget(0, 4)
-        self.tbl_args.setHorizontalHeaderLabels(['有効','名前/位置','型','値'])
+        self.tbl_args.setHorizontalHeaderLabels(['有効', '名前/位置', '型', '値'])
         self.tbl_args.horizontalHeader().setStretchLastSection(True)
         self.tbl_args.verticalHeader().setVisible(False)
         self.tbl_args.verticalHeader().setDefaultSectionSize(28)
@@ -157,14 +184,63 @@ class MainWindow(QMainWindow):
         self.btn_stop.clicked.connect(self.stop_script)
         self.btn_copy_cmd.clicked.connect(lambda: self._copy_cmd())
 
+        # 新規：貼り付けから取り込み
+        self.btn_import_text.clicked.connect(self.import_args_from_pasted_text)
+        self.btn_import_clip.clicked.connect(self.import_args_from_clipboard)
+
         self.proc.readyReadStandardOutput.connect(self.on_proc_output)
         self.proc.started.connect(lambda: self.set_running_ui(True))
         self.proc.finished.connect(self.on_proc_finished)
         self.proc.errorOccurred.connect(self.on_proc_error)
 
-        # 初期化
-        self.refresh_scripts()
+        # 初期化：前回状態の復元（フォルダ/スクリプト/モード）
+        self.load_app_state()
         self.update_command_preview()
+
+    # ---------- QSettings：前回状態の保存/復元 ----------
+    def load_app_state(self):
+        """QSettingsから前回のフォルダ/スクリプト/モードを復元。"""
+        s = QSettings(ORG_NAME, APP_NAME)
+        last_folder = s.value("last_folder", "", type=str)
+        last_script = s.value("last_script", "", type=str)
+        video_mode = s.value("video_mode", "なし", type=str)
+        transfer_on = s.value("transfer_on", False, type=bool)
+        shutdown_on = s.value("shutdown_on", False, type=bool)
+
+        # フォルダ反映＆一覧作成
+        if last_folder:
+            self.ed_folder.setText(last_folder)
+        self.refresh_scripts()
+
+        # スクリプト選択（存在すれば）
+        if last_script:
+            idx = self.cb_script.findText(Path(last_script).name)
+            if idx >= 0:
+                self.cb_script.setCurrentIndex(idx)
+                # -> on_script_changed()でプリセットも読み込まれる
+
+        # モード反映（プリセット側にモードがある場合は on_script_changed で上書きされる）
+        self.cb_video_mode.setCurrentText(video_mode if video_mode in ("録画", "映像", "なし") else "なし")
+        self.chk_transfer.setChecked(bool(transfer_on))
+        self.chk_shutdown.setChecked(bool(shutdown_on))
+
+    def save_app_state(self):
+        """QSettingsへフォルダ/スクリプト/モードを保存。"""
+        s = QSettings(ORG_NAME, APP_NAME)
+        s.setValue("last_folder", self.ed_folder.text())
+        s.setValue("last_script", str(self.current_script) if self.current_script else "")
+        s.setValue("video_mode", self.cb_video_mode.currentText())
+        s.setValue("transfer_on", self.chk_transfer.isChecked())
+        s.setValue("shutdown_on", self.chk_shutdown.isChecked())
+        s.sync()
+
+    def closeEvent(self, event):
+        """終了時に状態保存＆現在スクリプトのプリセットをサイレント保存。"""
+        try:
+            self.save_app_state()
+            self.save_preset(auto=True)
+        finally:
+            super().closeEvent(event)
 
     # ---------- フォルダ/スクリプト ----------
     def choose_folder(self):
@@ -187,8 +263,10 @@ class MainWindow(QMainWindow):
             self.cb_script.addItem(p.name, str(p))
         self.cb_script.blockSignals(False)
         if py_files:
-            self.cb_script.setCurrentIndex(0)
-            self.on_script_changed()
+            # 既にQSettings復元で選択済みなら on_script_changed が走る
+            if self.cb_script.currentIndex() < 0:
+                self.cb_script.setCurrentIndex(0)
+                self.on_script_changed()
         else:
             self.current_script = None
             self.clear_args()
@@ -197,6 +275,7 @@ class MainWindow(QMainWindow):
     def on_script_changed(self):
         data = self.cb_script.currentData()
         self.current_script = Path(data) if data else None
+        # スクリプト固有プリセットを読み込み（引数＋モード）
         self.load_preset()
         self.update_command_preview()
 
@@ -207,7 +286,7 @@ class MainWindow(QMainWindow):
 
         # 有効
         chk = QCheckBox()
-        chk.setChecked(True if not arg else bool(arg.get('enabled', True)))
+        chk.setChecked(False if not arg else bool(arg.get('enabled', False)))  # 既定は無効
         self.tbl_args.setCellWidget(row, 0, chk)
 
         # 名前
@@ -216,8 +295,10 @@ class MainWindow(QMainWindow):
         self.tbl_args.setItem(row, 1, name_item)
 
         # 型
-        cb_type = QComboBox()
-        cb_type.addItems(ARG_TYPES)
+        cb_type = NoWheelComboBox()
+        # 念のため list[str] も選択可能に
+        type_choices = list(dict.fromkeys(ARG_TYPES + ['list[str]']))
+        cb_type.addItems(type_choices)
         cb_type.setCurrentText('str' if not arg else str(arg.get('type', 'str')))
         self.tbl_args.setCellWidget(row, 2, cb_type)
 
@@ -312,8 +393,64 @@ class MainWindow(QMainWindow):
                     argv.append(str(val))
         return argv
 
-    # ---------- 実行 ----------
+    # ---------- 行検索＆更新ユーティリティ（貼り付け→マージ用） ----------
+    def _row_index_by_name(self, name: str) -> int:
+        """名前列に一致する行インデックスを返す。なければ -1。"""
+        for r in range(self.tbl_args.rowCount()):
+            item = self.tbl_args.item(r, 1)
+            if item and item.text().strip() == name.strip():
+                return r
+        return -1
 
+    def _set_row(self, row: int, typ: str, value: Any, enabled: bool = True):
+        """既存行に型・値・有効フラグをセット（型変更時は値ウィジェット再生成）。"""
+        cb_type = self.tbl_args.cellWidget(row, 2)
+        if isinstance(cb_type, QComboBox):
+            cb_type.setCurrentText(typ)
+            self._rebuild_value_widget(row, typ)
+
+        w = self.tbl_args.cellWidget(row, 3)
+        if typ.startswith('list'):
+            text = ",".join(map(str, value if isinstance(value, list) else [value]))
+            if isinstance(w, QLineEdit):
+                w.setText(text)
+        elif typ == 'int' and isinstance(w, QSpinBox):
+            try:
+                w.setValue(int(value))
+            except Exception:
+                w.setValue(0)
+        elif typ == 'float' and isinstance(w, QDoubleSpinBox):
+            try:
+                w.setValue(float(value))
+            except Exception:
+                w.setValue(0.0)
+        elif typ == 'flag' and isinstance(w, QCheckBox):
+            w.setChecked(bool(value))
+        else:
+            if isinstance(w, QLineEdit):
+                w.setText(str(value))
+
+        chk = self.tbl_args.cellWidget(row, 0)
+        if isinstance(chk, QCheckBox):
+            chk.setChecked(bool(enabled))
+
+    # ---------- コマンドファイル出力 ----------
+    def command_file_path(self) -> Path:
+        base = Path(QStandardPaths.writableLocation(QStandardPaths.AppConfigLocation))
+        base = base / APP_NAME
+        base.mkdir(parents=True, exist_ok=True)
+        return base / "last_command.txt"
+
+    def write_last_command(self, text: str):
+        try:
+            p = self.command_file_path()
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(text + "\n")
+            self.out.appendPlainText(f"[コマンド保存] {p}")
+        except Exception as e:
+            self.out.appendPlainText(f"[コマンド保存エラー] {e}")
+
+    # ---------- 実行 ----------
     def run_script(self):
         if self.proc.state() != QProcess.NotRunning:
             QMessageBox.information(self, '実行中', 'すでにプロセスが実行中です。停止してから再実行してください。')
@@ -322,7 +459,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'スクリプト未選択', '実行する .py スクリプトを選択してください。')
             return
 
-    # 前処理（ビデオモード）
+        # 前処理（ビデオモード）
         mode = self.cb_video_mode.currentText()
         try:
             if mode == '録画':
@@ -337,22 +474,26 @@ class MainWindow(QMainWindow):
                 self.out.appendPlainText('[前処理] ビデオモードなし（スルー）')
         except Exception as e:
             QMessageBox.critical(self, '前処理失敗', f'ビデオモードの前処理で失敗しました:\n{e}')
-            return
+            return  # スクリプト実行は中止
 
         py = sys.executable
         script = str(self.current_script)
         args = self.gather_args()
 
+        # 出力クリア＆コマンド表示
         self.out.clear()
         preview = f'$ {self._quote(py)} {self._quote(script)} ' + ' '.join(map(self._quote, args))
         self.out.appendPlainText(preview + '\n')
 
+        # コマンドをファイルへ上書き保存
+        self.write_last_command(preview)
+
+        # 実行
         self.proc.setWorkingDirectory(str(self.current_folder))
         self.proc.start(py, [script] + args)
         if not self.proc.waitForStarted(3000):
             QMessageBox.critical(self, '起動失敗', 'プロセスの起動に失敗しました。共有ライブラリや権限を確認してください。')
         self.update_command_preview()
-
 
     def stop_script(self):
         if self.proc.state() != QProcess.NotRunning:
@@ -364,13 +505,11 @@ class MainWindow(QMainWindow):
         cursor = self.out.textCursor(); cursor.movePosition(cursor.End)
         self.out.setTextCursor(cursor)
 
-
     def on_proc_finished(self, code, status):
-        global sd_mode
         self.set_running_ui(False)
         self.out.appendPlainText(f'\n[終了] code={code}, status={status}')
 
-    # 後処理：ビデオモードが録画/映像なら rec_end を最初に実行
+        # 後処理：ビデオモードが録画/映像なら rec_end を先に実施
         mode = self.cb_video_mode.currentText()
         try:
             if mode in ('録画', '映像'):
@@ -381,7 +520,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.out.appendPlainText(f'[後処理エラー] rec_end: {e}')
 
-    # 続けて転送 → シャットダウン
+        # 転送 → シャットダウン
         try:
             if self.chk_transfer.isChecked():
                 self.out.appendPlainText('[後処理] touch_disable')
@@ -392,16 +531,13 @@ class MainWindow(QMainWindow):
             if self.chk_shutdown.isChecked():
                 self.out.appendPlainText('[後処理] shut_down')
                 shut_down()
-            elif sd_mode=True:
-                self.out.appendPlainText('[後処理] shut_down')
-                shut_down()                
             else:
                 self.out.appendPlainText('[後処理] シャットダウンモードなし（スルー）')
+
         except Exception as e:
             self.out.appendPlainText(f'[後処理エラー] {e}')
 
         self.update_command_preview()
-
 
     def on_proc_error(self, err):
         self.set_running_ui(False)
@@ -415,7 +551,7 @@ class MainWindow(QMainWindow):
         self.btn_browse.setEnabled(not running)
         self.btn_refresh.setEnabled(not running)
 
-    # ---------- プリセット ----------
+    # ---------- プリセット（JSON）：引数＋モードの保存/復元 ----------
     def preset_dir(self) -> Path:
         base = Path(QStandardPaths.writableLocation(QStandardPaths.AppConfigLocation))
         d = base / APP_NAME / 'presets'
@@ -428,10 +564,15 @@ class MainWindow(QMainWindow):
         name = self.current_script.stem + '.json'
         return self.preset_dir() / name
 
-    def save_preset(self):
+    def save_preset(self, auto: bool = False):
+        """
+        引数テーブルとモード（video_mode/transfer_on/shutdown_on）を保存。
+        auto=True の場合はメッセージ非表示（終了時サイレント保存用）。
+        """
         import json
         if not self.current_script:
-            QMessageBox.information(self, '保存不可', 'スクリプトが選択されていません。')
+            if not auto:
+                QMessageBox.information(self, '保存不可', 'スクリプトが選択されていません。')
             return
         rows = []
         for r in range(self.tbl_args.rowCount()):
@@ -439,42 +580,59 @@ class MainWindow(QMainWindow):
             name = self.tbl_args.item(r, 1).text() if self.tbl_args.item(r, 1) else ''
             typ = self.tbl_args.cellWidget(r, 2).currentText()
             val = self._value_widget_to_python(r)
+            # list型は文字列→リストにして保存
             if isinstance(val, str) and typ in ('list[int]', 'list[float]', 'list[str]'):
                 items = [x.strip() for x in val.split(',') if x.strip()]
                 val = items
             rows.append({'enabled': enabled, 'name': name, 'type': typ, 'value': val})
+
+        data = {
+            'args': rows,
+            'video_mode': self.cb_video_mode.currentText(),
+            'transfer_on': self.chk_transfer.isChecked(),
+            'shutdown_on': self.chk_shutdown.isChecked(),
+        }
+
         p = self.preset_path()
         try:
             with open(p, 'w', encoding='utf-8') as f:
-                json.dump(rows, f, ensure_ascii=False, indent=2)
-            QMessageBox.information(self, '保存', f'プリセットを保存しました:\n{p}')
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            if not auto:
+                QMessageBox.information(self, '保存', f'プリセットを保存しました:\n{p}')
         except Exception as e:
-            QMessageBox.critical(self, '保存失敗', f'プリセット保存に失敗しました:\n{e}')
+            if not auto:
+                QMessageBox.critical(self, '保存失敗', f'プリセット保存に失敗しました:\n{e}')
 
     def load_preset(self):
+        """プリセット（引数＋モード）を復元。引数がなければ空のまま。"""
         import json
         self.clear_args()
         p = self.preset_path()
-        if p and p.exists():
-            try:
-                with open(p, 'r', encoding='utf-8') as f:
-                    rows = json.load(f)
-                for r in rows:
-                    self.add_arg_row(r)
-            except Exception:
-                pass
+        if not p or not p.exists():
+            return
+        try:
+            with open(p, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            # 引数復元（保存データのenabledを尊重）
+            for r in data.get('args', []):
+                self.add_arg_row(r)
+            # モード復元（存在すれば）
+            vm = data.get('video_mode')
+            if vm in ('録画', '映像', 'なし'):
+                self.cb_video_mode.setCurrentText(vm)
+            self.chk_transfer.setChecked(bool(data.get('transfer_on', self.chk_transfer.isChecked())))
+            self.chk_shutdown.setChecked(bool(data.get('shutdown_on', self.chk_shutdown.isChecked())))
+        except Exception:
+            # 読み込み失敗時は無視
+            pass
 
-    # ---------- 取り込み ----------
+    # ---------- 取り込み（parse_args の AST解析） ----------
     def import_from_parse_args(self):
         if not self.current_script or not self.current_script.exists():
             QMessageBox.warning(self, 'スクリプト未選択', '対象の .py スクリプトを選択してください。')
             return
         try:
             src = self.current_script.read_text(encoding='utf-8')
-        except Exception as e:
-            QMessageBox.critical(self, '読み込み失敗', f'スクリプトの読み込みに失敗しました:\n{e}')
-            return
-        try:
             rows = extract_args_from_source(src)
         except Exception as e:
             QMessageBox.critical(self, '解析失敗', f'AST解析でエラーが発生しました:\n{e}')
@@ -482,11 +640,160 @@ class MainWindow(QMainWindow):
         if not rows:
             QMessageBox.information(self, '検出なし', 'parse_args() から引数定義を検出できませんでした。')
             return
+
+        # ポイント：すべて無効の状態で投入
         self.clear_args()
         for r in rows:
+            r['enabled'] = False
             self.add_arg_row(r)
+
         self.update_command_preview()
-        QMessageBox.information(self, '取り込み完了', f'{len(rows)} 個の引数を取り込みました。')
+        QMessageBox.information(self, '取り込み完了', f'{len(rows)} 個の引数を（すべて無効として）取り込みました。')
+
+    # ---------- 新規：貼り付けテキストから引数復元（該当のみ有効化） ----------
+    def import_args_from_clipboard(self):
+        from PySide6.QtWidgets import QApplication
+        text = QApplication.clipboard().text()
+        self.paste_input.setPlainText(text)
+        self.import_args_from_pasted_text()
+
+    def import_args_from_pasted_text(self):
+        """
+        貼り付けテキストからコマンドラインを解析して引数テーブルへマージ。
+        - parse_args取り込み済みのテーブルを前提に、該当する行のみ「有効化＆値セット」
+        - 未存在の引数は行を追加して有効化
+        """
+        if not self.current_script or not self.current_script.exists():
+            QMessageBox.warning(self, 'スクリプト未選択', '対象の .py スクリプトを選択してください。')
+            return
+
+        raw = self.paste_input.toPlainText().strip()
+        if not raw:
+            QMessageBox.information(self, '入力なし', '貼り付けテキストが空です。')
+            return
+
+        # AST解析で仕様取得
+        try:
+            src = self.current_script.read_text(encoding='utf-8')
+            schema = extract_args_from_source(src)
+        except Exception as e:
+            QMessageBox.critical(self, '解析失敗', f'AST解析でエラーが発生しました:\n{e}')
+            return
+
+        # オプション情報と位置引数の順序
+        opt_info: Dict[str, Dict[str, Any]] = {}
+        positional_names: List[str] = []
+        for r in schema:
+            name = r.get('name', '')
+            if name.startswith('-'):
+                opt_info[name] = r
+            else:
+                positional_names.append(name)
+
+        # トークン化 & 先頭の python/-m/スクリプト除去
+        try:
+            toks: List[str] = shlex.split(raw)
+        except Exception as e:
+            QMessageBox.critical(self, '解析失敗', f'コマンドラインの分割に失敗しました:\n{e}')
+            return
+
+        cleaned: List[str] = []
+        i = 0
+        while i < len(toks):
+            t = toks[i]
+            # pythonインタプリタの除外
+            if i == 0 and re.search(r'python(\d+(\.\d+)*)?$', Path(t).name):
+                i += 1
+                if i < len(toks) and toks[i] == '-m':
+                    i += 2
+                continue
+            # 現在スクリプトの除外
+            cur = str(self.current_script)
+            if Path(t).name == Path(cur).name or t == cur:
+                i += 1
+                continue
+            cleaned.append(t)
+            i += 1
+
+        if not cleaned:
+            QMessageBox.information(self, '引数なし', '貼り付けテキストから引数が抽出できませんでした。')
+            return
+
+        # 型推定ヘルパ
+        def guess_type(val: str) -> str:
+            if val.lower() in ('true', 'yes', 'on', 'false', 'no', 'off'):
+                return 'flag'
+            if re.fullmatch(r'[+-]?\d+', val):
+                return 'int'
+            if re.fullmatch(r'[+-]?\d+\.\d+', val):
+                return 'float'
+            return 'str'
+
+        # マージ実行：既存行は有効化＆値セット、無ければ追加して有効化
+        pos_idx = 0
+        j = 0
+        n = len(cleaned)
+        while j < n:
+            token = cleaned[j]
+            if token.startswith('-'):
+                info = opt_info.get(token)
+                if info and info.get('type', 'str') == 'flag':
+                    typ, val = 'flag', True
+                    row = self._row_index_by_name(token)
+                    if row >= 0:
+                        self._set_row(row, typ, val, enabled=True)
+                    else:
+                        self.add_arg_row({'enabled': True, 'name': token, 'type': typ, 'value': val})
+                    j += 1
+                    continue
+
+                typ = info.get('type', 'str') if info else 'str'
+                if typ.startswith('list'):
+                    vals: List[str] = []
+                    k = j + 1
+                    while k < n and not cleaned[k].startswith('-'):
+                        vals.append(cleaned[k])
+                        k += 1
+                    row = self._row_index_by_name(token)
+                    if row >= 0:
+                        self._set_row(row, typ, vals, enabled=True)
+                    else:
+                        self.add_arg_row({'enabled': True, 'name': token, 'type': typ, 'value': vals})
+                    j = k
+                else:
+                    if j + 1 < n and not cleaned[j + 1].startswith('-'):
+                        val = cleaned[j + 1]
+                        if info is None:
+                            typ = guess_type(val)
+                        row = self._row_index_by_name(token)
+                        if row >= 0:
+                            self._set_row(row, typ, val, enabled=True)
+                        else:
+                            self.add_arg_row({'enabled': True, 'name': token, 'type': typ, 'value': val})
+                        j += 2
+                    else:
+                        row = self._row_index_by_name(token)
+                        if row >= 0:
+                            self._set_row(row, typ, '', enabled=True)
+                        else:
+                            self.add_arg_row({'enabled': True, 'name': token, 'type': typ, 'value': ''})
+                        j += 1
+            else:
+                # 位置引数
+                name = positional_names[pos_idx] if pos_idx < len(positional_names) else token
+                typ = guess_type(token)
+                if typ == 'flag':
+                    typ = 'str'  # 位置引数にflagは非現実的 → 文字列に
+                row = self._row_index_by_name(name)
+                if row >= 0:
+                    self._set_row(row, typ, token, enabled=True)
+                else:
+                    self.add_arg_row({'enabled': True, 'name': name, 'type': typ, 'value': token})
+                pos_idx += 1
+                j += 1
+
+        self.update_command_preview()
+        QMessageBox.information(self, '取り込み完了', '貼り付けテキストを反映しました（該当引数のみ有効化）。')
 
     # ---------- ユーティリティ ----------
     def update_command_preview(self):
