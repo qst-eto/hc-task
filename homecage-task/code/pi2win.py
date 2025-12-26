@@ -2,6 +2,7 @@ import subprocess
 import sys
 import time
 
+
 try:
     import paramiko
 except ImportError:
@@ -30,3 +31,11 @@ with SCPClient(ssh.get_transport()) as scp:
     scp.put(ras_path , win_path , recursive=True)
     
 ssh.close()
+
+"""
+
+print ("run pi2win")
+time.sleep(3)
+print ("end pi2win")
+
+"""
