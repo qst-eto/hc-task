@@ -35,7 +35,7 @@ def rec_standby():
 
 def rec_start():
     global recording
-	recording = subprocess.Popen(gst_command)
+    recording = subprocess.Popen(gst_command)
     
 def video_start():
     global recording
@@ -43,8 +43,8 @@ def video_start():
 
 def rec_end():
     global recording
-	recording.send_signal(signal.SIGINT)
-	recording.wait()
+    recording.send_signal(signal.SIGINT)
+    recording.wait()
 
 def transfer_start():
     global transfer_done,sd_mode
@@ -104,7 +104,7 @@ def touch_disable():
     subprocess.run(["python", "./code/file_move.py"])
 
 def shut_down():
-	subprocess.run(["sudo", "shutdown", "-h", "now"])
+    subprocess.run(["sudo", "shutdown", "-h", "now"])
 
 
 
