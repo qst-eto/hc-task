@@ -9,10 +9,10 @@ dt=datetime.now()
 datetime_str=dt.strftime("%Y-%m-%d")
 pass_name="location=/home/user/Desktop/homecage-task/logs/"+datetime_str+"_video.mp4"
 
+rec_mode=0
+
 # フラグ
 transfer_done = False
-sd_mode=False #シャットダウンモード
-rec_mode=False #録画
 
 #第一引数に実行スクリプトを入力
 
@@ -30,18 +30,12 @@ gst_command = [
 ]
 
 
-if rec_mode==True:
+if rec_mode==1:
 
 	recording = subprocess.Popen(gst_command)
 
 
 #------------------------------
-
-#-----pre_arg test
-with open('pre_arg.txt','w') as f:
-	for i in sys.argv:
-		print(i, end=' ', file=f)
-#------------------
 
 args=sys.argv[1:]
 
@@ -56,7 +50,7 @@ subprocess.run(['python', script_name] + script_args)
 #実験スクリプト終了-----------------
 
 
-if rec_mode==True:
+if rec_mode==1:
 	recording.send_signal(signal.SIGINT)
 	recording.wait()
 
@@ -64,10 +58,10 @@ if rec_mode==True:
 #OC script----------------------
 
 def run_scp():
-    global transfer_done,sd_mode
-
+    global transfer_done
     subprocess.run(["python", "./code/pi2win.py"])
     import time
+    time.sleep(5)  # ダミー転送時間
     transfer_done = True  # 転送完了を通知
 
 # --- Pygame 初期化 ---
@@ -91,16 +85,6 @@ threading.Thread(target=run_scp, daemon=True).start()
 running = True
 while running:
     for event in pygame.event.get():
-
-        if event.type == pygame.KEYDOWN and event.key == pygame.K_s: #Sキーを入力するとSDmodeをオンにする
-            sd_mode=True
-            screen.fill((0, 0, 0))
-            font = pygame.font.SysFont(None, 60)
-            text = font.render("sd_mode", True, (255, 255, 255))
-            text_rect = text.get_rect(center=(info.current_w // 2, info.current_h // 2))
-            screen.blit(text, text_rect)
-            pygame.display.update()
-		
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             running = False  # ESCで終了
         elif event.type in [pygame.MOUSEBUTTONDOWN, pygame.KEYDOWN]:
@@ -114,12 +98,4 @@ while running:
 
 pygame.quit()
 
-subprocess.run(["python", "./code/file_move.py"])
-
-if sd_mode==True:
-	subprocess.run(["sudo", "shutdown", "-h", "now"])
-
-
-
-
-
+subprocess.run(["sudo", "shutdown", "-h", "now"])

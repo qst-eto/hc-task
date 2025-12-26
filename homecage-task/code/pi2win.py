@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import time
 
 try:
     import paramiko
@@ -15,12 +16,12 @@ except ImportError:
     from scp import SCPClient
 
 
-host = "192.168.86.246" #ホスト名 or IP
+host = "hc-task02.local" #ホスト名 or IP
 port = 22
 username = "user" #接続先のユーザー名
 password = "user" #接続先のパスワード
-ras_path="/home/user/Desktop/homecage-task/logs" #logファイルのパス
-win_path="C:/Users/user/Desktop" #保存先のパス
+ras_path="./logs" #logファイルのパス
+win_path="C:/Users/user/Desktop/logs/280" #保存先のパス
 
 ssh = paramiko.SSHClient()
 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
