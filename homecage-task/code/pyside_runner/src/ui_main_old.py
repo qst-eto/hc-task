@@ -1,20 +1,15 @@
 
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-
 import sys
-import os
-import io
 import shlex
 import re
 import datetime
-import traceback
-import runpy
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-from PySide6.QtCore import Qt, QStandardPaths, QSettings, QThread, Signal
-from PySide6.QtGui import QAction, QTextCursor
+from PySide6.QtCore import Qt, QProcess, QStandardPaths, QSettings
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QFileDialog, QMessageBox, QSizePolicy,
     QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
@@ -22,6 +17,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QCheckBox, QPlainTextEdit, QSpinBox, QDoubleSpinBox,
     QDialog
 )
+from PySide6.QtGui import QTextCursor
 
 # --- 外部関数の読み込み ---
 try:
@@ -44,119 +40,10 @@ from argparse_ast import extract_args_from_source, ARG_TYPES
 APP_NAME = 'PyScriptRunner'
 ORG_NAME = 'EtoHayato'  # QSettings 識別
 
-
-# --------------------------------
-# 実行ワーカー（インプロセス）
-# --------------------------------
-class _EmittingStream(io.TextIOBase):
-    """stdout/stderr を行単位でUIへ流すための擬似ストリーム"""
-    def __init__(self, emit_line):
-        super().__init__()
-        self._emit_line = emit_line
-        self._buf = ""
-
-    def writable(self) -> bool:
-        return True
-
-    def write(self, s: str) -> int:
-        if not isinstance(s, str):
-            s = s.decode("utf-8", errors="replace")
-        self._buf += s
-        while True:
-            idx = self._buf.find("\n")
-            if idx == -1:
-                break
-            line = self._buf[:idx + 1]
-            self._emit_line(line)
-            self._buf = self._buf[idx + 1:]
-        return len(s)
-
-    def flush(self) -> None:
-        if self._buf:
-            self._emit_line(self._buf)
-            self._buf = ""
-
-
-class ScriptWorker(QThread):
-    output = Signal(str)     # 標準出力/標準エラー（混在）を逐次
-    error = Signal(str)      # 例外スタック等
-    finished = Signal(int)   # 戻りコード（成功=0, 失敗!=0）
-
-    def __init__(self, script_path: Path, argv: List[str], working_dir: Optional[Path] = None):
-        super().__init__()
-        self.script_path = Path(script_path)
-        self.argv = list(argv)
-        self.working_dir = Path(working_dir) if working_dir else self.script_path.parent
-        self._cancel_requested = False
-
-    # 協調的キャンセル（外部スクリプトがポーリングしていない限り即時停止は不可）
-    def cancel(self):
-        self._cancel_requested = True
-        self.output.emit("[INFO] キャンセル要求を送信しました（協調的停止）。\n")
-
-    def _emit(self, s: str):
-        # 改行で終わっていなければ付与して扱いやすく
-        if not s.endswith("\n"):
-            s = s + "\n"
-        self.output.emit(s)
-
-    def run(self):
-        rc = 1
-        # 実行環境の退避
-        old_cwd = Path.cwd()
-        old_argv = sys.argv[:]
-        old_stdout, old_stderr = sys.stdout, sys.stderr
-
-        # 標準出力/エラーのフック
-        out_stream = _EmittingStream(self.output.emit)
-        err_stream = _EmittingStream(self.output.emit)
-
-        try:
-            # カレントをスクリプトの場所へ
-            os.chdir(self.working_dir)
-
-            # sys.argv を対象スクリプト想定に差し替え
-            sys.argv = [str(self.script_path)] + self.argv
-
-            # 出力フック（print / logging を拾う）
-            sys.stdout = out_stream
-            sys.stderr = err_stream
-
-            # 実行
-            self._emit(f"[INFO] 実行開始: {self.script_path}")
-            runpy.run_path(str(self.script_path), run_name="__main__")
-            # キャンセル要求の有無に関係なく、ここまで来れば正常終了扱い
-            rc = 0
-
-        except SystemExit as e:
-            # スクリプトが sys.exit() した場合
-            code = getattr(e, 'code', 0)
-            rc = int(code) if isinstance(code, int) else (0 if not code else 1)
-            if rc != 0:
-                self.error.emit(f"[SystemExit] exit code={rc}\n")
-        except Exception:
-            self.error.emit(traceback.format_exc())
-            rc = 1
-        finally:
-            # ストリームフラッシュ＆復元
-            try:
-                sys.stdout.flush()
-                sys.stderr.flush()
-            except Exception:
-                pass
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
-            sys.argv = old_argv
-            os.chdir(old_cwd)
-
-        self.finished.emit(rc)
-
-
 # --- ホイール無効コンボボックス ---
 class NoWheelComboBox(QComboBox):
     def wheelEvent(self, event):
         event.ignore()
-
 
 # --- 転送設定ダイアログ ---
 class TransferSettingsDialog(QDialog):
@@ -236,7 +123,6 @@ class TransferSettingsDialog(QDialog):
             "win_path": self.ed_win.text().strip(),
         }
 
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -245,8 +131,9 @@ class MainWindow(QMainWindow):
 
         # 状態
         self.current_folder: Path = Path.home()
-        self.current_script: Optional[Path] = None
-        self.worker: Optional[ScriptWorker] = None
+        self.current_script: Path | None = None
+        self.proc = QProcess(self)
+        self.proc.setProcessChannelMode(QProcess.MergedChannels)
 
         # UI
         central = QWidget(self)
@@ -322,6 +209,7 @@ class MainWindow(QMainWindow):
         btns_layout.addWidget(self.btn_import_parse)
         btns_layout.addStretch(1)
         btns_layout.addWidget(self.btn_save_preset)
+
         args_layout.addWidget(self.tbl_args)
         args_layout.addLayout(btns_layout)
         root.addLayout(args_layout, stretch=1)
@@ -376,9 +264,14 @@ class MainWindow(QMainWindow):
         self.btn_import_text.clicked.connect(self.import_args_from_pasted_text)
         self.btn_import_clip.clicked.connect(self.import_args_from_clipboard)
 
+        self.proc.readyReadStandardOutput.connect(self.on_proc_output)
+        self.proc.started.connect(lambda: self.set_running_ui(True))
+        self.proc.finished.connect(self.on_proc_finished)
+        self.proc.errorOccurred.connect(self.on_proc_error)
+
         # 初期化：前回状態の復元（フォルダ/スクリプト/モード＋転送設定）
         self.load_app_state()
-        self.load_transfer_settings()  # ← 新規：QSettingsから転送設定を読み込み、opsへ反映
+        self.load_transfer_settings()   # ← 新規：QSettingsから転送設定を読み込み、opsへ反映
         self.update_command_preview()
 
     # ---------- 設定ダイアログ関連 ----------
@@ -427,11 +320,13 @@ class MainWindow(QMainWindow):
 
         if last_folder:
             self.ed_folder.setText(last_folder)
-            self.refresh_scripts()
+        self.refresh_scripts()
+
         if last_script:
             idx = self.cb_script.findText(Path(last_script).name)
             if idx >= 0:
                 self.cb_script.setCurrentIndex(idx)
+
         self.cb_video_mode.setCurrentText(video_mode if video_mode in ("録画", "映像", "なし") else "なし")
         self.chk_transfer.setChecked(bool(transfer_on))
         self.chk_shutdown.setChecked(bool(shutdown_on))
@@ -475,7 +370,7 @@ class MainWindow(QMainWindow):
         if py_files:
             if self.cb_script.currentIndex() < 0:
                 self.cb_script.setCurrentIndex(0)
-            self.on_script_changed()
+                self.on_script_changed()
         else:
             self.current_script = None
             self.clear_args()
@@ -604,27 +499,25 @@ class MainWindow(QMainWindow):
         cb_type = self.tbl_args.cellWidget(row, 2)
         if isinstance(cb_type, QComboBox):
             cb_type.setCurrentText(typ)
-        self._rebuild_value_widget(row, typ)
+            self._rebuild_value_widget(row, typ)
+
         w = self.tbl_args.cellWidget(row, 3)
         if typ.startswith('list'):
             text = ",".join(map(str, value if isinstance(value, list) else [value]))
             if isinstance(w, QLineEdit):
                 w.setText(text)
         elif typ == 'int' and isinstance(w, QSpinBox):
-            try:
-                w.setValue(int(value))
-            except Exception:
-                w.setValue(0)
+            try: w.setValue(int(value))
+            except Exception: w.setValue(0)
         elif typ == 'float' and isinstance(w, QDoubleSpinBox):
-            try:
-                w.setValue(float(value))
-            except Exception:
-                w.setValue(0.0)
+            try: w.setValue(float(value))
+            except Exception: w.setValue(0.0)
         elif typ == 'flag' and isinstance(w, QCheckBox):
             w.setChecked(bool(value))
         else:
             if isinstance(w, QLineEdit):
                 w.setText(str(value))
+
         chk = self.tbl_args.cellWidget(row, 0)
         if isinstance(chk, QCheckBox):
             chk.setChecked(bool(enabled))
@@ -647,9 +540,8 @@ class MainWindow(QMainWindow):
 
     # ---------- 実行 ----------
     def run_script(self):
-        # 実行中チェック
-        if self.worker and self.worker.isRunning():
-            QMessageBox.information(self, '実行中', 'すでに実行中です。停止してから再実行してください。')
+        if self.proc.state() != QProcess.NotRunning:
+            QMessageBox.information(self, '実行中', 'すでにプロセスが実行中です。停止してから再実行してください。')
             return
         if not self.current_script or not self.current_script.exists():
             QMessageBox.warning(self, 'スクリプト未選択', '実行する .py スクリプトを選択してください。')
@@ -670,37 +562,42 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, '前処理失敗', f'ビデオモードの前処理で失敗しました:\n{e}')
             return
 
+        py = sys.executable
         script = str(self.current_script)
         args = self.gather_args()
 
         self.out.clear()
-        preview = f'$ {self._quote(sys.executable)} {self._quote(script)} ' + ' '.join(map(self._quote, args))
+        preview = f'$ {self._quote(py)} {self._quote(script)} ' + ' '.join(map(self._quote, args))
         self.out.appendPlainText(preview + '\n')
 
         # 追記：開始時刻／コマンド本文
         self.write_last_command("script start " + datetime.datetime.now().strftime('%Y/%m/%d %H:%M:%S'))
         self.write_last_command(preview)
 
-        # ワーカー起動（インプロセス実行）
-        self.worker = ScriptWorker(self.current_script, args, working_dir=self.current_script.parent)
-        self.worker.output.connect(self.append_output)
-        self.worker.error.connect(lambda s: self.append_output("[EXCEPTION]\n" + s))
-        self.worker.finished.connect(self.on_worker_finished)
-
-        self.set_running_ui(True)
-        self.append_output(f"[INFO] {self.current_script.name} を開始します …\n")
-        self.worker.start()
+        # 実行
+        self.proc.setWorkingDirectory(str(self.current_folder))
+        self.proc.start(py, [script] + args)
+        if not self.proc.waitForStarted(3000):
+            QMessageBox.critical(self, '起動失敗', 'プロセスの起動に失敗しました。共有ライブラリや権限を確認してください。')
+        self.update_command_preview()
 
     def stop_script(self):
-        if self.worker and self.worker.isRunning():
-            # 協調的キャンセルのみ（強制終了は不可）
-            self.worker.cancel()
-        else:
-            self.out.appendPlainText("[INFO] 実行中のスクリプトはありません。")
+        if self.proc.state() != QProcess.NotRunning:
+            self.proc.kill()
 
-    def on_worker_finished(self, rc: int):
+    def on_proc_output(self):
+        data = bytes(self.proc.readAllStandardOutput()).decode(errors='ignore')
+        self.out.appendPlainText(data)
+
+        cursor = self.out.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)  # ← ここを修正
+        self.out.setTextCursor(cursor)
+
+
+    def on_proc_finished(self, code, status):
         self.set_running_ui(False)
-        self.out.appendPlainText(f'\n[終了] code={rc}')
+        self.out.appendPlainText(f'\n[終了] code={code}, status={status}')
+
         # 追記：終了時刻
         self.write_last_command("script stop " + datetime.datetime.now().strftime('%Y/%m/%d %H:%M:%S') + "\n")
 
@@ -732,17 +629,17 @@ class MainWindow(QMainWindow):
 
         self.update_command_preview()
 
-    def set_running_ui(self, running: bool):
+    def on_proc_error(self, err):
+        self.set_running_ui(False)
+        self.out.appendPlainText(f'\n[エラー] {err}')
+        self.update_command_preview()
 
-        # 実行中はRunボタンを無効、Stopボタンを有効
+    def set_running_ui(self, running: bool):
         self.btn_run.setEnabled(not running)
         self.btn_stop.setEnabled(running)
-
-        # 実行中は選択系をロック
         self.cb_script.setEnabled(not running)
         self.btn_browse.setEnabled(not running)
         self.btn_refresh.setEnabled(not running)
-
 
     # ---------- プリセット（JSON）：引数＋モード ----------
     def preset_dir(self) -> Path:
@@ -773,12 +670,14 @@ class MainWindow(QMainWindow):
                 items = [x.strip() for x in val.split(',') if x.strip()]
                 val = items
             rows.append({'enabled': enabled, 'name': name, 'type': typ, 'value': val})
+
         data = {
             'args': rows,
             'video_mode': self.cb_video_mode.currentText(),
             'transfer_on': self.chk_transfer.isChecked(),
             'shutdown_on': self.chk_shutdown.isChecked(),
         }
+
         p = self.preset_path()
         try:
             with open(p, 'w', encoding='utf-8') as f:
@@ -822,10 +721,12 @@ class MainWindow(QMainWindow):
         if not rows:
             QMessageBox.information(self, '検出なし', 'parse_args() から引数定義を検出できませんでした。')
             return
+
         self.clear_args()
         for r in rows:
             r['enabled'] = False
             self.add_arg_row(r)
+
         self.update_command_preview()
         QMessageBox.information(self, '取り込み完了', f'{len(rows)} 個の引数を（すべて無効として）取り込みました。')
 
@@ -844,6 +745,7 @@ class MainWindow(QMainWindow):
         if not raw:
             QMessageBox.information(self, '入力なし', '貼り付けテキストが空です。')
             return
+
         try:
             src = self.current_script.read_text(encoding='utf-8')
             schema = extract_args_from_source(src)
@@ -868,27 +770,22 @@ class MainWindow(QMainWindow):
         i = 0
         while i < len(toks):
             t = toks[i]
-            # 先頭の python / python3 / pythonX.Y を除去
             if i == 0 and re.search(r'python(\d+(\.\d+)*)?$', Path(t).name):
                 i += 1
-                if i < len(toks) and toks[i] == '-m':
-                    i += 2
+                if i < len(toks) and toks[i] == '-m': i += 2
                 continue
-            # スクリプト本体のトークンを除去
             cur = str(self.current_script)
             if Path(t).name == Path(cur).name or t == cur:
-                i += 1
-                continue
-            cleaned.append(t)
-            i += 1
+                i += 1; continue
+            cleaned.append(t); i += 1
 
         if not cleaned:
             QMessageBox.information(self, '引数なし', '貼り付けテキストから引数が抽出できませんでした。')
         else:
             def guess_type(val: str) -> str:
                 if val.lower() in ('true', 'yes', 'on', 'false', 'no', 'off'): return 'flag'
-                if re.fullmatch(r'[+\-]?\d+', val): return 'int'
-                if re.fullmatch(r'[+\-]?\d+\.\d+', val): return 'float'
+                if re.fullmatch(r'[+-]?\d+', val): return 'int'
+                if re.fullmatch(r'[+-]?\d+\.\d+', val): return 'float'
                 return 'str'
 
             pos_idx = 0; j = 0; n = len(cleaned)
@@ -902,6 +799,7 @@ class MainWindow(QMainWindow):
                         if row >= 0: self._set_row(row, typ, val, enabled=True)
                         else: self.add_arg_row({'enabled': True, 'name': token, 'type': typ, 'value': val})
                         j += 1; continue
+
                     typ = info.get('type', 'str') if info else 'str'
                     if typ.startswith('list'):
                         vals: List[str] = []; k = j + 1
@@ -937,11 +835,6 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, '取り込み完了', '貼り付けテキストを反映しました（該当引数のみ有効化）。')
 
     # ---------- ユーティリティ ----------
-    def append_output(self, text: str):
-        self.out.moveCursor(QTextCursor.MoveOperation.End)
-        self.out.insertPlainText(text)
-        self.out.moveCursor(QTextCursor.MoveOperation.End)
-
     def update_command_preview(self):
         py = self._quote(sys.executable)
         script = self._quote(str(self.current_script)) if self.current_script else '(未選択)'
