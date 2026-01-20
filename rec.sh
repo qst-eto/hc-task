@@ -1,0 +1,2 @@
+file="/home/user/Desktop/video/record_$(date +%Y%m%d_%H%M%S).mp4"
+gst-launch-1.0 --eos-on-shutdown v4l2src device=/dev/video0 ! tee name=t t. ! queue ! videoconvert ! x264enc tune=zerolatency bitrate=500 speed-preset=superfast ! rtph264pay ! udpsink host=hc-task02.local port=5000 t. ! queue ! videoconvert ! x264enc bitrate=1000 speed-preset=ultrafast ! mp4mux faststart=true ! filesink location="$file" sync=true
