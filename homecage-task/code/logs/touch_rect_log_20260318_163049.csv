@@ -1,0 +1,5 @@
+start_iso,iso,rel_s,state,x,y,rect_w,rect_h,iti_ms,event,outside_in_trial,max_outside_before_fail,trial_outcome,iti_kind,release_dwell_required_ms,release_dwell_elapsed_ms
+2026-03-18T16:30:35.374,2026-03-18T16:30:38.389,3.014602,SHOW,-1,-1,1920,1080,1292,TOUCH_TTL_FAIL,0,,success,correct,,
+2026-03-18T16:30:35.374,2026-03-18T16:30:41.392,6.018389,SHOW,-1,-1,1920,1080,2088,TOUCH_TTL_FAIL,0,,success,correct,,
+2026-03-18T16:30:35.374,2026-03-18T16:30:44.396,9.021870,SHOW,-1,-1,1920,1080,1754,TOUCH_TTL_FAIL,0,,success,correct,,
+2026-03-18T16:30:35.374,2026-03-18T16:30:47.398,12.024016,SHOW,-1,-1,1920,1080,1682,TOUCH_TTL_FAIL,0,,success,correct,,
