@@ -657,7 +657,11 @@ class MainWindow(QMainWindow):
 
         self.save_app_state()
         self.save_preset(auto=True)
+<<<<<<< HEAD
 
+=======
+        
+>>>>>>> 047e993a316d74bf5c30a01553adbda2cf72b898
         # 前処理（ビデオモード）
         mode = self.cb_video_mode.currentText()
         try:
