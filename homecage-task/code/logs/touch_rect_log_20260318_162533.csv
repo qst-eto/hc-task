@@ -1,2 +1,0 @@
-start_iso,iso,rel_s,state,x,y,rect_w,rect_h,iti_ms,event,outside_in_trial,max_outside_before_fail,trial_outcome,iti_kind,release_dwell_required_ms,release_dwell_elapsed_ms
-2026-03-18T16:25:30.933,2026-03-18T16:25:32.291,1.358184,SHOW,777,521,1920,1080,2602,TOUCH_TTL_FAIL,0,,success,correct,,

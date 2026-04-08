@@ -42,7 +42,7 @@ except Exception:
 from argparse_ast import extract_args_from_source, ARG_TYPES
 
 APP_NAME = 'PyScriptRunner'
-ORG_NAME = 'EtoHayato'  # QSettings 識別
+ORG_NAME = 'PSR'  # QSettings 識別
 
 
 # --------------------------------
@@ -654,6 +654,9 @@ class MainWindow(QMainWindow):
         if not self.current_script or not self.current_script.exists():
             QMessageBox.warning(self, 'スクリプト未選択', '実行する .py スクリプトを選択してください。')
             return
+
+        self.save_app_state()
+        self.save_preset(auto=True)
 
         # 前処理（ビデオモード）
         mode = self.cb_video_mode.currentText()
