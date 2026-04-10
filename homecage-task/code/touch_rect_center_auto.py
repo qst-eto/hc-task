@@ -224,6 +224,45 @@ def run(args):
             screen.blit(set_pic_image[num],(args.picposition_x - img_width_center,args.picposition_y - img_height_center))
             pic_num += 1
         
+        def scale_pic(pic):
+            img_width=pic.get_width()
+            img_height=pic.get_height()
+            frac=img_width/img_height
+            if frac == 16/9:
+                return pygame.transform.scale(pic,(1920,1080))
+
+            elif frac > 16/9: #横長
+                img_shape=1
+
+            else: #縦長
+                img_shape=2
+
+            if args.autoscale=="blank":
+                if img_shape==1:
+                    width=1920
+                    height=1920/img_width*img_height
+                    return pygame.transform.scale(pic,(width,height))
+                    
+                if img_shape==2:
+                    width=1080/img_height*img_width
+                    height=1080
+                    return pygame.transform.scale(pic,(width,height))
+                    
+            elif args.autoscale=="full":
+                if img_shape==1:
+                    width=1080/img_height*img_width
+                    height=1080
+                    return pygame.transform.scale(pic,(width,height))
+                    
+                if img_shape==2:
+                    width=1920
+                    height=1920/img_width*img_height
+                    return pygame.transform.scale(pic,(width,height))
+                    
+            else:
+                return pygame.transform.scale(pic,(1920,1080))
+            
+        
         if args.showpic:
             if args.showpic[-4:]==".png":
                 global apple
@@ -238,7 +277,7 @@ def run(args):
                 for i in range(len(files)):
                     set_pic_image.append(pygame.image.load(args.showpic +"/"+ files[i]))
                     if args.autoscale:
-                        set_pic_image[i]=pygame.transform.scale(set_pic_image[i],(1920,1080))
+                        set_pic_image[i]=scale_pic(set_pic_image[i])
                 
         
         draw(stim_on=True)
@@ -556,12 +595,13 @@ def parse_args():
     p.add_argument("--show-box", action="store_true")
     p.add_argument("--info", action="store_true")
     
+    # 追加オプション
     p.add_argument("--autosuccess", type=float, default=None, help="自動成功モード　時間を入力")
     p.add_argument("--pulsecount", type=int, default=1, help="連射数")
     p.add_argument("--showpic", type=str, default=None, help="画像フォルダを入力するとフォルダの中の画像が順番に表示される")
-    p.add_argument("--autoscale", action="store_true", help="画像を全画面スケールに変更")
     p.add_argument("--picposition_x", type=float, default=1920 / 2, help="画像の中心座標xを指定")
     p.add_argument("--picposition_y", type=float, default=1080 / 2, help="画像の中心座標yを指定")
+    p.add_argument("--autoscale", choices=["blank","full","ext"], default=None, help="blankで空白あり、fullで空白なし、extで1920*1080に引きのばす")
     
     return p.parse_args()
 
