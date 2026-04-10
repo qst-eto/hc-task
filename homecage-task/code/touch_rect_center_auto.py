@@ -77,6 +77,8 @@ def compute_rect(sw, sh, mode, size_frac, square_px, fullscreen, min_side_px, al
 # Main
 # =========================
 def run(args):
+    global pulsecount
+    pulsecount=args.pulsecount
     pygame.init()
     pygame.mixer.init(frequency=44100, size=-16, channels=1)
 
@@ -151,7 +153,7 @@ def run(args):
         release_clear_start_t = None   # 連続解放の開始時刻
         wait_release_enter_t = None    # WAIT_RELEASE に入った時刻
 
-        ttl = ArduinoTTLSender(args.serial_port, args.serial_baud)
+        #ttl = ArduinoTTLSender(args.serial_port, args.serial_baud)
         beep = make_beep_sound(args.beep_freq, args.beep_ms, args.beep_volume)
 
         logs = []
@@ -172,9 +174,14 @@ def run(args):
         def draw(stim_on: bool):
             screen.fill(args.bg_rgb)
             if stim_on:
-                pygame.draw.rect(screen, args.rect_rgb, rect)
+                if args.showpic:
+                    show_pic()
+                else:
+                    pygame.draw.rect(screen, args.rect_rgb, rect)
+                
                 if args.show_box:
                     pygame.draw.rect(screen, (120, 120, 120), rect, 2)
+            
             if args.info:
                 txt1 = (f"State={['SHOW','ITI','WAIT_RELEASE'][state]}  "
                         f"Rect {rect.w}x{rect.h}  successes={successes}  failures={failures}  "
@@ -199,20 +206,57 @@ def run(args):
             if extra is not None:
                 row.update(extra)
             logs.append(row)
-
+            
+        def show_pic():
+            if args.showpic[-4:]==".png":
+                screen.blit(apple,(200,200))
+            else:
+                show_picset()
+            
+            pygame.display.update()
+            
+        def show_picset():
+            global pic_num
+            num=pic_num%len(set_pic_image)
+            img_width_center = set_pic_image[num].get_width()/2
+            img_height_center= set_pic_image[num].get_height()/2
+            
+            screen.blit(set_pic_image[num],(args.picposition_x - img_width_center,args.picposition_y - img_height_center))
+            pic_num += 1
+        
+        if args.showpic:
+            if args.showpic[-4:]==".png":
+                global apple
+                apple=pygame.image.load(args.showpic)
+            else:
+                import os
+                global set_pic_image,pic_num
+                pic_num=0
+                dir_path=args.showpic
+                files=os.listdir(dir_path)
+                set_pic_image=[]
+                for i in range(len(files)):
+                    set_pic_image.append(pygame.image.load(args.showpic +"/"+ files[i]))
+                    if args.autoscale:
+                        set_pic_image[i]=pygame.transform.scale(set_pic_image[i],(1920,1080))
+                
+        
         draw(stim_on=True)
-
+        
         running = True
         iti_end_time = 0.0
 
 
         def handle_success(x=-1,y=-1):
+            global pulsecount
             nonlocal state, iti_end_time, successes, size_frac, rect
             nonlocal touch_during_iti, outside_touches_in_trial
                             # 成功（矩形内）→ TTL/ビープ、ITI(correct)へ
             ok = True
             try:
-                ttl.pulse()
+                for i in range (pulsecount):
+                    ttl.pulse()
+                    time.sleep(0.28)
             except Exception as e:
                 print(f"[ERROR] TTL 失敗: {e}", file=sys.stderr)
                 ok = False
@@ -241,11 +285,11 @@ def run(args):
             touch_during_iti = mouse_down or bool(active_fingers)
             iti_end_time = time.perf_counter() + iti_ms / 1000.0
             draw(stim_on=False)
-
+            
 
             # === Demo auto-success ===
-        demo_auto_success = True          # デモ用ON/OFF
-        demo_interval_s = 3.0             # 何秒ごとに自動成功させるか
+#        demo_auto_success = args.autosuccess          # デモ用ON/OFF
+        demo_interval_s = args.autosuccess           # 何秒ごとに自動成功させるか
         last_success_time = time.perf_counter()
         
         
@@ -254,7 +298,7 @@ def run(args):
 
             now = time.perf_counter()
             # === Demo auto-success ===
-            if demo_auto_success and state == STATE_SHOW:
+            if demo_interval_s and state == STATE_SHOW:
                 if (now - last_success_time) >= demo_interval_s:
                     handle_success(-1, -1)  # 座標なしの疑似成功
                     last_success_time = iti_end_time
@@ -278,6 +322,8 @@ def run(args):
                     active_fingers.add(ev.finger_id)
                 elif ev.type == pygame.FINGERUP:
                     active_fingers.discard(ev.finger_id)
+                elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 3:
+                    draw(stim_on=True)
 
                 # 位置取得ヘルパ
                 def _get_xy(e):
@@ -509,6 +555,14 @@ def parse_args():
     p.add_argument("--out-dir", type=str, default="logs")
     p.add_argument("--show-box", action="store_true")
     p.add_argument("--info", action="store_true")
+    
+    p.add_argument("--autosuccess", type=float, default=None, help="自動成功モード　時間を入力")
+    p.add_argument("--pulsecount", type=int, default=1, help="連射数")
+    p.add_argument("--showpic", type=str, default=None, help="画像フォルダを入力するとフォルダの中の画像が順番に表示される")
+    p.add_argument("--autoscale", action="store_true", help="画像を全画面スケールに変更")
+    p.add_argument("--picposition_x", type=float, default=1920 / 2, help="画像の中心座標xを指定")
+    p.add_argument("--picposition_y", type=float, default=1080 / 2, help="画像の中心座標yを指定")
+    
     return p.parse_args()
 
 
