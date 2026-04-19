@@ -153,7 +153,7 @@ def run(args):
         release_clear_start_t = None   # 連続解放の開始時刻
         wait_release_enter_t = None    # WAIT_RELEASE に入った時刻
 
-        #ttl = ArduinoTTLSender(args.serial_port, args.serial_baud)
+        ttl = ArduinoTTLSender(args.serial_port, args.serial_baud)
         beep = make_beep_sound(args.beep_freq, args.beep_ms, args.beep_volume)
 
         logs = []
@@ -292,6 +292,10 @@ def run(args):
             nonlocal touch_during_iti, outside_touches_in_trial
                             # 成功（矩形内）→ TTL/ビープ、ITI(correct)へ
             ok = True
+            
+            screen.fill((0,0,0))
+            pygame.display.flip()
+            
             try:
                 for i in range (pulsecount):
                     ttl.pulse()
