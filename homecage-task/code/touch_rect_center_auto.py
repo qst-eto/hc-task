@@ -153,7 +153,9 @@ def run(args):
         release_clear_start_t = None   # 連続解放の開始時刻
         wait_release_enter_t = None    # WAIT_RELEASE に入った時刻
 
-        ttl = ArduinoTTLSender(args.serial_port, args.serial_baud)
+
+#---------------------------------------------------------------------------------------
+#        ttl = ArduinoTTLSender(args.serial_port, args.serial_baud)
         beep = make_beep_sound(args.beep_freq, args.beep_ms, args.beep_volume)
 
         logs = []
@@ -328,7 +330,50 @@ def run(args):
             touch_during_iti = mouse_down or bool(active_fingers)
             iti_end_time = time.perf_counter() + iti_ms / 1000.0
             draw(stim_on=False)
+        
+        def manual_success(x=-1,y=-1):
+            global pulsecount
+            nonlocal state, iti_end_time, successes, size_frac, rect
+            nonlocal touch_during_iti, outside_touches_in_trial
+                            # 成功（矩形内）→ TTL/ビープ、ITI(correct)へ
+            ok = True
             
+            screen.fill((0,0,0))
+            pygame.display.flip()
+            
+            try:
+                for i in range (int(pulsecount/2)):
+                    ttl.pulse()
+                    time.sleep(0.28*2)
+            except Exception as e:
+                print(f"[ERROR] TTL 失敗: {e}", file=sys.stderr)
+                ok = False
+            try:
+                beep.play()
+            except Exception:
+                pass
+
+            iti_ms = sample_iti("correct")
+            append_log("TOUCH_TTL" if ok else "TOUCH_TTL_FAIL", x, y, iti_ms,
+                extra={"outside_in_trial": outside_touches_in_trial,
+                    "trial_outcome": "success",
+                    "iti_kind": "correct"})
+                            # shrink & 次試行の準備
+            if ok:
+                successes += 1
+                if shrink_every > 0 and (successes % shrink_every == 0):
+                    size_frac = max(min_frac, size_frac * shrink_factor)
+                    rect = cur_rect()
+            #if args.rect_mode in ("sqaure_custom", "square_custom") and args.square_px is not None:
+            #side = int(args.square_px)
+            #rect = pygame.Rect((sw - side)//2, (sh - side)//2, side, side)
+        # ITIへ
+            state = STATE_ITI
+    # ITI入り時点で接触があれば、ITI中タッチ有りと見なす
+            touch_during_iti = mouse_down or bool(active_fingers)
+            iti_end_time = time.perf_counter() + iti_ms / 1000.0
+            draw(stim_on=False)
+
 
             # === Demo auto-success ===
 #        demo_auto_success = args.autosuccess          # デモ用ON/OFF
@@ -367,6 +412,8 @@ def run(args):
                     active_fingers.discard(ev.finger_id)
                 elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 3:
                     draw(stim_on=True)
+                elif ev.type == pygame.KEYDOWN and ev.key ==pygame.K_SPACE:
+                    manual_success()
 
                 # 位置取得ヘルパ
                 def _get_xy(e):
