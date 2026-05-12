@@ -261,9 +261,11 @@ def run(args):
                     height=1920/img_width*img_height
                     return pygame.transform.scale(pic,(width,height))
                     
-            else:
+            elif args.autoscale=="ext":
                 return pygame.transform.scale(pic,(1920,1080))
             
+            elif args.autoscale=="sqext":
+                return pygame.transform.scale(pic,(args.sqpicsize,args.sqpicsize))
         
         if args.showpic:
             if args.showpic[-4:]==".png":
@@ -652,7 +654,8 @@ def parse_args():
     p.add_argument("--showpic", type=str, default=None, help="画像フォルダを入力するとフォルダの中の画像が順番に表示される")
     p.add_argument("--picposition_x", type=float, default=1920 / 2, help="画像の中心座標xを指定")
     p.add_argument("--picposition_y", type=float, default=1080 / 2, help="画像の中心座標yを指定")
-    p.add_argument("--autoscale", choices=["blank","full","ext"], default=None, help="blankで空白あり、fullで空白なし、extで1920*1080に引きのばす")
+    p.add_argument("--autoscale", choices=["blank","full","ext","sqext"], default=None, help="blankで空白あり、fullで空白なし、extで1920*1080に引きのばす")
+    p.add_argument("--sqpicsize", type=float, default=1080)
     
     return p.parse_args()
 

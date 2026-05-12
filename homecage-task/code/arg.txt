@@ -1,0 +1,1 @@
+--fullscreen --shrink-every 2000 --shrink-factor 1 --serial-port tty --iti-correct-min-ms 1000 --iti-correct-max-ms 3000 --iti-error-min-ms 3000 --iti-error-max-ms 5000 --show-box --info --autoscale sqext --sqpicsize 864 --square-px 864 --rect-mode square_custom --max-outside-before-fail 5 --showpic fruits2
