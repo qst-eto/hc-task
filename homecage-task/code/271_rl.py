@@ -137,7 +137,7 @@ def run(args):
         screen = pygame.display.set_mode(
             (0, 0) if args.fullscreen else (args.window_w, args.window_h), flags
         )
-        pygame.display.set_caption("Two-Stimulus Discrimination Task (Correction Trials, Plate-based Hit)")
+        pygame.display.set_caption("Two-Stimulus Discrimination Task (Reversal Learning, Correction Trials, Plate-based Hit)")
         clock = pygame.time.Clock()
         font = pygame.font.SysFont(None, 28)
         sw, sh = screen.get_size()
@@ -158,7 +158,6 @@ def run(args):
             stim_h = max(1, int(args.stim_h))
 
         # ---- プレート（背景グレー矩形）のサイズ ----
-        # 既定は画像サイズと同一。指定があれば上書き。常に画像サイズ以上にクランプ。
         if args.plate_px is not None:
             plate_w = plate_h = max(stim_w, stim_h, int(args.plate_px))
         elif args.plate_w is not None and args.plate_h is not None:
@@ -242,7 +241,6 @@ def run(args):
         # ---- TTL / ビープ ----
         if args.testmode!=True:
             ttl = ArduinoTTLSender(args.serial_port, args.serial_baud)
-
         try:
             beep = make_beep_sound(args.beep_freq, args.beep_ms, args.beep_volume)
         except Exception as e:
@@ -273,7 +271,14 @@ def run(args):
             "left_image","right_image","target_image","non_target_image",
             "trial_index_global","trial_index_in_set",
             "sliding_n","sliding_correct","sliding_acc",
-            "correction_mode","is_correction_trial"
+            "correction_mode","is_correction_trial",
+            # ==== REVERSAL: 追加列 ====
+            "target_label",                 # r / rn（rn=逆転後にnrが正解）
+            "reversal_count_in_set",
+            "reversals_per_set",
+            "reversal_event",               # REVERSAL_TRIGGERED / ADVANCE_TO_NEXT_SET_AFTER_REVERSALS など
+            "reversal_idx",
+            "reversal_trigger_acc"
         ]
         csv_f = out_path.open("w", newline="", encoding="utf-8")
         csv_w = csv.DictWriter(csv_f, fieldnames=fieldnames)
@@ -291,8 +296,14 @@ def run(args):
         current_set_idx = 0  # 0-based
         sliding_n = max(1, int(args.sliding_n))
         acc_threshold = float(args.acc_threshold)
+
         window = deque(maxlen=sliding_n)
         sliding_correct = 0  # window 内 1 の個数（高速化）
+
+        # ==== REVERSAL: 逆転管理 ====
+        reversals_per_set = max(0, int(args.reversals_per_set))
+        reversal_count_in_set = 0
+        target_is_r = True  # True: r が正解（既定）。False: nr が正解（=論理ラベル rn）
 
         # ---- コレクショントライアル管理 ----
         correction_mode_enabled = bool(args.correction_mode)
@@ -313,6 +324,11 @@ def run(args):
             rel = nowp - t0
             iso = datetime.now().isoformat(timespec="milliseconds")
             cur_pair = stim_pairs[current_set_idx]
+
+            # ==== REVERSAL: target/non-target は現在の正解に合わせて動的化 ====
+            tgt_img_name = cur_pair.r_path.name if target_is_r else cur_pair.nr_path.name
+            nontgt_img_name = cur_pair.nr_path.name if target_is_r else cur_pair.r_path.name
+
             row = {
                 "start_iso": start_iso,
                 "iso": iso,
@@ -339,8 +355,8 @@ def run(args):
                 "right_label": "nr" if left_is_r else "r",
                 "left_image": (cur_pair.r_path.name if left_is_r else cur_pair.nr_path.name),
                 "right_image": (cur_pair.nr_path.name if left_is_r else cur_pair.r_path.name),
-                "target_image": cur_pair.r_path.name,
-                "non_target_image": cur_pair.nr_path.name,
+                "target_image": tgt_img_name,
+                "non_target_image": nontgt_img_name,
                 "trial_index_global": trial_index_global,
                 "trial_index_in_set": trial_index_in_set,
                 "sliding_n": sliding_n,
@@ -348,6 +364,13 @@ def run(args):
                 "sliding_acc": (sliding_correct / len(window)) if len(window) > 0 else 0.0,
                 "correction_mode": 1 if correction_mode_enabled else 0,
                 "is_correction_trial": 1 if current_trial_is_correction else 0,
+                # ==== REVERSAL: 追加ログ ====
+                "target_label": "r" if target_is_r else "rn",
+                "reversal_count_in_set": reversal_count_in_set,
+                "reversals_per_set": reversals_per_set,
+                "reversal_event": "",
+                "reversal_idx": "",
+                "reversal_trigger_acc": ""
             }
             if extra is not None:
                 row.update(extra)
@@ -386,6 +409,8 @@ def run(args):
                         f"outside={outside_touches_in_trial}/{max_outside_before_fail}  "
                         f"win{sliding_n} acc={acc*100:.1f}%  "
                         f"corr={'ON' if current_trial_is_correction else 'OFF'}  "
+                        f"tgt={'r' if target_is_r else 'rn'}  "
+                        f"rev={reversal_count_in_set}/{reversals_per_set}  "
                         f"HIT=plate(+margin {hit_margin_px}px)")
                 screen.blit(font.render(txt1, True, (220, 220, 220)), (20, 20))
             pygame.display.flip()
@@ -413,9 +438,56 @@ def run(args):
 
             append_log("TRIAL_PLACED", -1, -1, 0)
 
-        # ---- 正答率窓を更新し、必要ならセット昇格 ----
-        def update_window_and_maybe_advance(was_correct: bool, trial_is_correction: bool, allow_advance: bool):
+        # ==== REVERSAL: ユーティリティ ====
+        def log_reversal_event(kind: str, idx: int, acc_val: float):
+            # kind: "REVERSAL_TRIGGERED" / "ADVANCE_TO_NEXT_SET_AFTER_REVERSALS"
+            append_log(kind, -1, -1, 0, extra={
+                "reversal_event": kind,
+                "reversal_idx": idx,
+                "reversal_trigger_acc": f"{acc_val:.6f}"
+            })
+
+        def perform_reversal(acc_val: float):
+            """r<->nr の正解関係を反転。窓をリセット。コレクション状態は解除。"""
+            nonlocal target_is_r, reversal_count_in_set, window, sliding_correct
+            nonlocal correction_active, correction_left_is_r
+
+            target_is_r = not target_is_r
+            reversal_count_in_set += 1
+            window.clear()
+            sliding_correct = 0
+            # コレクション状態は無効化（配置固定が残らないように）
+            correction_active = False
+            correction_left_is_r = None
+
+            log_reversal_event("REVERSAL_TRIGGERED", reversal_count_in_set, acc_val)
+            print(f"[INFO] Reversal #{reversal_count_in_set} in {stim_pairs[current_set_idx].label}: target={'r' if target_is_r else 'nr'} (acc={acc_val:.3f} >= {acc_threshold:.3f})")
+
+        def advance_to_next_set(acc_val: float, reason: str):
+            """次の刺激セットへ移行（存在すれば）。移行時に状態を初期化。"""
             nonlocal current_set_idx, trial_index_in_set, window, sliding_correct
+            nonlocal reversal_count_in_set, target_is_r
+            nonlocal correction_active, correction_left_is_r
+
+            if (current_set_idx + 1) < len(stim_pairs):
+                current_set_idx += 1
+                trial_index_in_set = 0
+                window.clear()
+                sliding_correct = 0
+                # 新セットは既定で r が正解から開始
+                target_is_r = True
+                reversal_count_in_set = 0
+                correction_active = False
+                correction_left_is_r = None
+                log_reversal_event(reason, "", acc_val)
+                print(f"[INFO] Advance to {stim_pairs[current_set_idx].label} ({reason}; acc>={acc_threshold:.3f})")
+            else:
+                # 最終セットなら維持（従来仕様）。必要ならここで終了動作を入れる。
+                print(f"[INFO] Already at last set; no further advance ({reason}).")
+
+        # ---- 正答率窓を更新し、必要なら reversal or 次セットへ移行 ----
+        def update_window_and_maybe_transition(was_correct: bool, trial_is_correction: bool, allow_transition: bool):
+            nonlocal window, sliding_correct
 
             # コレクショントライアルを正答率から除外するオプション
             consider_for_acc = True
@@ -430,15 +502,26 @@ def run(args):
                 window.append(1 if was_correct else 0)
                 if was_correct: sliding_correct += 1
 
-            # セット昇格（許可されたときのみ）
-            if allow_advance and len(window) == sliding_n:
+            # 閾値到達判定
+            if not allow_transition:
+                return
+
+            if len(window) == sliding_n:
                 acc = sliding_correct / sliding_n
-                if acc > acc_threshold and (current_set_idx + 1) < len(stim_pairs):
-                    current_set_idx += 1
-                    trial_index_in_set = 0
-                    window.clear()
-                    sliding_correct = 0
-                    print(f"[INFO] Advance to {stim_pairs[current_set_idx].label} (acc={acc:.3f} > {acc_threshold:.3f})")
+                # ==== 依頼に合わせて「以上」判定（>=）====
+                if acc >= acc_threshold:
+                    if reversals_per_set <= 0:
+                        # 従来動作：即 次セットへ
+                        advance_to_next_set(acc, "ADVANCE_TO_NEXT_SET")
+                    else:
+                        # 逆転あり
+                        if reversal_count_in_set < (reversals_per_set - 1):
+                            # まだ最終回でない → reversal のみ実行
+                            perform_reversal(acc)
+                        else:
+                            # これが X 回目の reversal → reversal を実行し、直後に次セットへ
+                            perform_reversal(acc)  # ここで reversal_count_in_set == reversals_per_set
+                            advance_to_next_set(acc, "ADVANCE_TO_NEXT_SET_AFTER_REVERSALS")
 
         # 初回配置
         place_new_trial()
@@ -522,8 +605,11 @@ def run(args):
                                 hit_area = "right_core" if right_plate_rect.collidepoint((x, y)) else "right_margin"
                                 touched_is_r = (not left_is_r)
 
-                            if touched_is_r:
-                                # ==== 成功（r をタッチ）====
+                            # ==== REVERSAL: 現在の正解に合わせて判定 ====
+                            touched_is_target = (touched_is_r == target_is_r)
+
+                            if touched_is_target:
+                                # ==== 成功（現在の正解をタッチ）====
                                 ok = True
                                 try:
                                     for i in range (args.pulsecount):
@@ -539,7 +625,7 @@ def run(args):
                                     pass
 
                                 iti_ms = sample_iti("correct")
-                                append_log("TOUCH_R_CORRECT" if ok else "TOUCH_R_CORRECT_TTL_FAIL", x, y, iti_ms,
+                                append_log("TOUCH_TARGET_CORRECT" if ok else "TOUCH_TARGET_CORRECT_TTL_FAIL", x, y, iti_ms,
                                            extra={"hit_area": hit_area,
                                                   "trial_outcome": "success",
                                                   "iti_kind": "correct"})
@@ -553,8 +639,8 @@ def run(args):
 
                                 trial_index_global += 1
                                 trial_index_in_set += 1
-                                # 成功時は昇格判定を許可
-                                update_window_and_maybe_advance(True, trial_is_correction, allow_advance=True)
+                                # 成功時は遷移判定を許可
+                                update_window_and_maybe_transition(True, trial_is_correction, allow_transition=True)
 
                                 state = STATE_ITI
                                 touch_during_iti = mouse_down or bool(active_fingers)
@@ -562,13 +648,13 @@ def run(args):
                                 draw(stim_on=False)
 
                             else:
-                                # ==== 失敗（nr をタッチ）====
+                                # ==== 失敗（現在の不正解をタッチ）====
                                 failures += 1
                                 iti_ms = sample_iti("error")
-                                append_log("TOUCH_NR_ERROR", x, y, iti_ms,
+                                append_log("TOUCH_NONTARGET_ERROR", x, y, iti_ms,
                                            extra={"hit_area": hit_area,
                                                   "trial_outcome": "error",
-                                                  "fail_reason": "touched_nr",
+                                                  "fail_reason": "touched_non_target",
                                                   "iti_kind": "error"})
                                 trial_is_correction = current_trial_is_correction
                                 # 以降は同じ左右配置を維持
@@ -578,9 +664,9 @@ def run(args):
 
                                 trial_index_global += 1
                                 trial_index_in_set += 1
-                                # 失敗時はコレクション有効なら昇格禁止
-                                update_window_and_maybe_advance(False, trial_is_correction,
-                                                                allow_advance=(not correction_mode_enabled))
+                                # 失敗時はコレクション有効なら遷移禁止（従来仕様を踏襲）
+                                update_window_and_maybe_transition(False, trial_is_correction,
+                                                                    allow_transition=(not correction_mode_enabled))
 
                                 state = STATE_ITI
                                 touch_during_iti = mouse_down or bool(active_fingers)
@@ -606,8 +692,8 @@ def run(args):
 
                                 trial_index_global += 1
                                 trial_index_in_set += 1
-                                update_window_and_maybe_advance(False, trial_is_correction,
-                                                                allow_advance=(not correction_mode_enabled))
+                                update_window_and_maybe_transition(False, trial_is_correction,
+                                                                    allow_transition=(not correction_mode_enabled))
 
                                 state = STATE_ITI
                                 touch_during_iti = mouse_down or bool(active_fingers)
@@ -719,7 +805,7 @@ def run(args):
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Two-stimulus discrimination task (r vs nr, symmetric placement, correction trials, plate-based hit)")
+    p = argparse.ArgumentParser(description="Two-stimulus discrimination task (r vs nr, reversal learning, symmetric placement, correction trials, plate-based hit)")
     # 画面
     p.add_argument("--fullscreen", action="store_true")
     p.add_argument("--window-w", type=int, default=1280)
@@ -771,21 +857,25 @@ def parse_args():
                    help="プレートの外側に当たり判定マージン（px）。この範囲内のタッチも inside とする")
     # 学習ステップ：n 試行窓と閾値
     p.add_argument("--sliding-n", type=int, default=20, help="正答率判定の試行窓 n")
-    p.add_argument("--acc-threshold", type=float, default=0.8, help="昇格閾値（0.0-1.0）。'超えたら'昇格")
+    p.add_argument("--acc-threshold", type=float, default=0.8, help="閾値（0.0-1.0）。'以上'で逆転/昇格を判定")
     # コレクショントライアル
     p.add_argument("--correction-mode", action="store_true",
                    help="失敗したら成功まで前試行と同じ左右配置を繰り返す（コレクショントライアル）")
     p.add_argument("--exclude-correction-from-acc", action="store_true",
-                   help="正答率（昇格判定）からコレクショントライアルを除外する（任意）")
+                   help="正答率（判定窓）からコレクショントライアルを除外する（任意）")
+    # ==== REVERSAL: 追加引数 ====
+    p.add_argument("--reversals-per-set", type=int, default=0,
+                   help="各刺激セットでの逆転回数 X。0=逆転なし（従来動作：閾値到達で次セットへ）。"
+                        "1以上: 閾値到達のたび r<->nr を入れ替え、X回目の逆転直後に次セットへ移行。")
     # ログ/表示
     p.add_argument("--out-dir", type=str, default="logs")
     p.add_argument("--show-box", action="store_true")
     p.add_argument("--info", action="store_true")
-    
+
     p.add_argument("--pulsecount", type=int, default=1, help="連射数")
     p.add_argument("--name", type=str, default='', help="logの名前を指定")
     p.add_argument("--testmode", action="store_true")
-    
+
     return p.parse_args()
 
 
