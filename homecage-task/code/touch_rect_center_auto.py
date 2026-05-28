@@ -155,7 +155,8 @@ def run(args):
 
 
 #---------------------------------------------------------------------------------------
-#        ttl = ArduinoTTLSender(args.serial_port, args.serial_baud)
+        if args.testmode!=True:
+            ttl = ArduinoTTLSender(args.serial_port, args.serial_baud)
         beep = make_beep_sound(args.beep_freq, args.beep_ms, args.beep_volume)
 
         logs = []
@@ -267,6 +268,17 @@ def run(args):
             elif args.autoscale=="sqext":
                 return pygame.transform.scale(pic,(args.sqpicsize,args.sqpicsize))
         
+        def ttl_error():
+            screen.fill((0,125,0))
+            font=pygame.font.Font(None, 100)
+            text_surface = font.render("TTL ERROR",True,(255,255,255))
+            screen.blit(text_surface,(400,400))
+            pygame.display.update()
+            while True:
+                event = pygame.event.wait()
+                if event.type == pygame.KEYDOWN:
+                    break
+        
         if args.showpic:
             if args.showpic[-4:]==".png":
                 global apple
@@ -306,6 +318,7 @@ def run(args):
                     time.sleep(0.28)
             except Exception as e:
                 print(f"[ERROR] TTL 失敗: {e}", file=sys.stderr)
+                ttl_error()
                 ok = False
             try:
                 beep.play()
@@ -656,6 +669,8 @@ def parse_args():
     p.add_argument("--picposition_y", type=float, default=1080 / 2, help="画像の中心座標yを指定")
     p.add_argument("--autoscale", choices=["blank","full","ext","sqext"], default=None, help="blankで空白あり、fullで空白なし、extで1920*1080に引きのばす")
     p.add_argument("--sqpicsize", type=float, default=1080)
+    p.add_argument("--testmode", action="store_true")
+    
     
     return p.parse_args()
 
