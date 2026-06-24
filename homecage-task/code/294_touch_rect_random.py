@@ -76,7 +76,10 @@ def _place_square_random(sw: int, sh: int, side: int, fullscreen: bool, allow_au
     y_min, y_max = m, sh - side - m
     y = random.randint(y_min, y_max) if y_max >= y_min else max(0, (sh - side) // 2)
 
-    return pygame.Rect(x, y, side, side)
+    if args.showpic:
+        return screen.blit(show_pic(),(x,y))
+    else:
+        return pygame.Rect(x, y, side, side)
 
 
 # =========================
@@ -260,11 +263,12 @@ def run(args):
 
         def show_pic():
             if args.showpic[-4:]==".png":
-                screen.blit(apple,(200,200))
+                #screen.blit(apple,(200,200))
+                return apple
             else:
-                show_picset()
+                return show_picset()
             
-            pygame.display.update()
+            #pygame.display.update()
             
         def show_picset():
             global pic_num
@@ -272,9 +276,10 @@ def run(args):
             img_width_center = set_pic_image[num].get_width()/2
             img_height_center= set_pic_image[num].get_height()/2
             
-            screen.blit(set_pic_image[num],(args.picposition_x - img_width_center,args.picposition_y - img_height_center))
+            #screen.blit(set_pic_image[num],(args.picposition_x - img_width_center,args.picposition_y - img_height_center))
             pic_num += 1
-        
+            return set_pic_image[num]
+            
         def scale_pic(pic):
             img_width=pic.get_width()
             img_height=pic.get_height()
@@ -327,7 +332,7 @@ def run(args):
                 if event.type == pygame.KEYDOWN:
                     break
         
-                if args.showpic:
+        if args.showpic:
             if args.showpic[-4:]==".png":
                 global apple
                 apple=pygame.image.load(args.showpic)
@@ -349,9 +354,7 @@ def run(args):
             screen.fill(args.bg_rgb)
             if stim_on:
                 pygame.draw.rect(screen, args.rect_rgb, rect)
-                if args.showpic:
-                    show_pic()
-                elif args.show_box:
+                if args.show_box:
                     pygame.draw.rect(screen, (120, 120, 120), rect, 2)
             if args.info:
                 txt1 = (f"State={['SHOW','ITI','WAIT_RELEASE'][state]}  "
@@ -447,7 +450,8 @@ def run(args):
                                     time.sleep(0.28)
                             except Exception as e:
                                 print(f"[ERROR] TTL 失敗: {e}", file=sys.stderr)
-                                ttl_error()
+                                if args.testmode!=True:
+                                    ttl_error()
                                 ok = False
                             try:
                                 if beep is not None:
@@ -644,10 +648,15 @@ def parse_args():
     p.add_argument("--out-dir", type=str, default="logs")
     p.add_argument("--show-box", action="store_true")
     p.add_argument("--info", action="store_true")
-    
     p.add_argument("--pulsecount", type=int, default=1, help="連射数")
     p.add_argument("--name", type=str, default='', help="logの名前を指定")
     p.add_argument("--testmode", action="store_true")
+    p.add_argument("--showpic", type=str, default=None, help="画像フォルダを入力するとフォルダの中の画像が順番に表示される")
+    p.add_argument("--picposition_x", type=float, default=1920 / 2, help="画像の中心座標xを指定")
+    p.add_argument("--picposition_y", type=float, default=1080 / 2, help="画像の中心座標yを指定")
+    p.add_argument("--autoscale", choices=["blank","full","ext","sqext"], default=None, help="blankで空白あり、fullで空白なし、extで1920*1080に引きのばす")
+    p.add_argument("--sqpicsize", type=float, default=1080)
+    
     return p.parse_args()
 
 
