@@ -47,17 +47,7 @@ def make_beep_sound(freq=1000, duration_ms=100, volume=0.6, sample_rate=44100):
     return pygame.mixer.Sound(buffer=buf.tobytes())
 
 
-# =========================
-# Rect placement (random, fixed-size)
-# =========================
 def _place_square_random(sw: int, sh: int, side: int, fullscreen: bool, allow_auto_fullscreen: bool) -> pygame.Rect:
-    """
-    一辺 side の正方形をランダム配置する。
-    - 左右は 0..(sw-side) の範囲でランダム
-    - 上下はマージン m を取り、m = min(side/2, (sh - side)/2)
-    - auto_fullscreen 条件成立時は全面矩形
-    - はみ出し防止のため side を sw, sh にクランプ
-    """
     side = max(1, int(side))
     short = min(sw, sh)
 
@@ -76,11 +66,8 @@ def _place_square_random(sw: int, sh: int, side: int, fullscreen: bool, allow_au
     y_min, y_max = m, sh - side - m
     y = random.randint(y_min, y_max) if y_max >= y_min else max(0, (sh - side) // 2)
 
-    if args.showpic:
-        return screen.blit(show_pic(),(x,y))
-    else:
-        return pygame.Rect(x, y, side, side)
-
+    # ✅ ここは必ず Rect を返す（描画はしない）
+    return pygame.Rect(x, y, side, side)
 
 # =========================
 # Main
@@ -262,12 +249,10 @@ def run(args):
 
 
         def show_pic():
-            if args.showpic[-4:]==".png":
-                #screen.blit(apple,(200,200))
+            if args.showpic[-4:] == ".png":
                 return apple
             else:
                 return show_picset()
-            
             #pygame.display.update()
             
         def show_picset():
@@ -349,19 +334,26 @@ def run(args):
                         set_pic_image[i]=scale_pic(set_pic_image[i])
        
 
-        # 描画
         def draw(stim_on: bool):
             screen.fill(args.bg_rgb)
+
             if stim_on:
-                pygame.draw.rect(screen, args.rect_rgb, rect)
-                if args.show_box:
-                    pygame.draw.rect(screen, (120, 120, 120), rect, 2)
+                if args.showpic:
+                    pic = show_pic()
+                    screen.blit(pic, (rect.x, rect.y))
+                else:
+                    pygame.draw.rect(screen, args.rect_rgb, rect)
+
+                    if args.show_box:
+                        pygame.draw.rect(screen, (120, 120, 120), rect, 2)
+
             if args.info:
                 txt1 = (f"State={['SHOW','ITI','WAIT_RELEASE'][state]}  "
                         f"Rect {rect.w}x{rect.h}@({rect.x},{rect.y})  "
                         f"margin={hit_margin_px}px  successes={successes}  failures={failures}  "
                         f"outside={outside_touches_in_trial}/{max_outside_before_fail}")
                 screen.blit(font.render(txt1, True, (220, 220, 220)), (20, 20))
+
             pygame.display.flip()
 
         # 最初の矩形を提示してログ
