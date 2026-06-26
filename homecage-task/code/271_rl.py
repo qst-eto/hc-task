@@ -505,7 +505,6 @@ def run(args):
             # 閾値到達判定
             if not allow_transition:
                 return
-
             if len(window) == sliding_n:
                 acc = sliding_correct / sliding_n
                 # ==== 依頼に合わせて「以上」判定（>=）====
@@ -666,7 +665,7 @@ def run(args):
                                 trial_index_in_set += 1
                                 # 失敗時はコレクション有効なら遷移禁止（従来仕様を踏襲）
                                 update_window_and_maybe_transition(False, trial_is_correction,
-                                                                    allow_transition=(not correction_mode_enabled))
+                                                                    allow_transition=((not correction_mode_enabled)+args.mode0))
 
                                 state = STATE_ITI
                                 touch_during_iti = mouse_down or bool(active_fingers)
@@ -693,7 +692,7 @@ def run(args):
                                 trial_index_global += 1
                                 trial_index_in_set += 1
                                 update_window_and_maybe_transition(False, trial_is_correction,
-                                                                    allow_transition=(not correction_mode_enabled))
+                                                                    allow_transition=((not correction_mode_enabled)+args.mode0))
 
                                 state = STATE_ITI
                                 touch_during_iti = mouse_down or bool(active_fingers)
@@ -875,6 +874,8 @@ def parse_args():
     p.add_argument("--pulsecount", type=int, default=1, help="連射数")
     p.add_argument("--name", type=str, default='', help="logの名前を指定")
     p.add_argument("--testmode", action="store_true")
+    
+    p.add_argument("--mode0", action="store_true")
 
     return p.parse_args()
 
