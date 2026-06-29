@@ -294,11 +294,20 @@ def run(args):
 
         # ---- セット・正答率管理 ----
         current_set_idx = 0  # 0-based
-        sliding_n = max(1, int(args.sliding_n))
+        if args.random_sliding:
+            sliding_n = random.randint(args.random_sliding[0],args.random_sliding[1])
+        else:
+            sliding_n = max(1, int(args.sliding_n))
+        
+        
+        
         acc_threshold = float(args.acc_threshold)
+            
 
         window = deque(maxlen=sliding_n)
         sliding_correct = 0  # window 内 1 の個数（高速化）
+
+        print(window)
 
         # ==== REVERSAL: 逆転管理 ====
         reversals_per_set = max(0, int(args.reversals_per_set))
@@ -449,12 +458,23 @@ def run(args):
 
         def perform_reversal(acc_val: float):
             """r<->nr の正解関係を反転。窓をリセット。コレクション状態は解除。"""
-            nonlocal target_is_r, reversal_count_in_set, window, sliding_correct
+            nonlocal target_is_r, reversal_count_in_set, window, sliding_correct, sliding_n
             nonlocal correction_active, correction_left_is_r
 
             target_is_r = not target_is_r
             reversal_count_in_set += 1
-            window.clear()
+            
+            
+            # windowをrandom_slidingの間で決定
+            
+            if args.random_sliding:
+                sliding_n = random.randint(args.random_sliding[0],args.random_sliding[1])
+                window = deque(maxlen=sliding_n)
+            else:
+                window.clear()
+            
+            print(window)
+            
             sliding_correct = 0
             # コレクション状態は無効化（配置固定が残らないように）
             correction_active = False
@@ -642,9 +662,13 @@ def run(args):
                                 update_window_and_maybe_transition(True, trial_is_correction, allow_transition=True)
 
                                 state = STATE_ITI
+                                
                                 touch_during_iti = mouse_down or bool(active_fingers)
                                 iti_end_time = time.perf_counter() + iti_ms / 1000.0
                                 draw(stim_on=False)
+                                
+                                #state = STATE_SHOW この2つをオンにするとITIを飛ばせる
+                                #draw(stim_on=True)
 
                             else:
                                 # ==== 失敗（現在の不正解をタッチ）====
@@ -738,8 +762,8 @@ def run(args):
                         append_log("RELEASE_DWELL_WILL_REQUIRE", -1, -1, 0)
 
             if state == STATE_WAIT_RELEASE:
+                
                 no_touch_now = (not mouse_down and not active_fingers)
-
                 if require_release_dwell:
                     if no_touch_now:
                         if release_clear_start_t is None:
@@ -875,6 +899,7 @@ def parse_args():
     p.add_argument("--name", type=str, default='', help="logの名前を指定")
     p.add_argument("--testmode", action="store_true")
     
+    p.add_argument("--random_sliding", type=int, nargs=2)
     p.add_argument("--mode0", action="store_true")
 
     return p.parse_args()
