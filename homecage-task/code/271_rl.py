@@ -291,6 +291,15 @@ def run(args):
         failures = 0
         trial_index_global = 0
         trial_index_in_set = 0
+        
+        if args.r_pulse:
+            r_pulse = args.r_pulse
+        else:
+            r_pulse = args.pulsecount
+        if args.nr_pulse:
+            nr_pulse = args.nr_pulse
+        else:
+            nr_pulse = args.pulsecount
 
         # ---- セット・正答率管理 ----
         current_set_idx = 0  # 0-based
@@ -420,7 +429,33 @@ def run(args):
                         f"corr={'ON' if current_trial_is_correction else 'OFF'}  "
                         f"tgt={'r' if target_is_r else 'rn'}  "
                         f"rev={reversal_count_in_set}/{reversals_per_set}  "
-                        f"HIT=plate(+margin {hit_margin_px}px)")
+                        f"HIT=plate(+margin {hit_margin_px}px)"
+                        f"r_pulse={r_pulse} "
+                        f"nr_pulse={nr_pulse} "
+                        f"count={len(window)} "
+                        )
+                screen.blit(font.render(txt1, True, (220, 220, 220)), (20, 20))
+            pygame.display.flip()
+            
+        def show_info():
+            if args.info:
+                pygame.draw.rect(screen, (0,0,0),(0,0,1920,100) )
+                cur_pair = stim_pairs[current_set_idx]
+                acc = (sliding_correct / len(window)) if len(window) > 0 else 0.0
+                txt1 = (f"State={['SHOW','ITI','WAIT_RELEASE'][state]}  "
+                        f"Set={cur_pair.label}  "
+                        f"Trials(g/s)={trial_index_global}/{trial_index_in_set}  "
+                        f"succ={successes}  fail={failures}  "
+                        f"outside={outside_touches_in_trial}/{max_outside_before_fail}  "
+                        f"win{sliding_n} acc={acc*100:.1f}%  "
+                        f"corr={'ON' if current_trial_is_correction else 'OFF'}  "
+                        f"tgt={'r' if target_is_r else 'rn'}  "
+                        f"rev={reversal_count_in_set}/{reversals_per_set}  "
+                        f"HIT=plate(+margin {hit_margin_px}px)"
+                        f"r_pulse={r_pulse} "
+                        f"nr_pulse={nr_pulse} "
+                        f"count={len(window)} "
+                        )
                 screen.blit(font.render(txt1, True, (220, 220, 220)), (20, 20))
             pygame.display.flip()
 
@@ -567,6 +602,25 @@ def run(args):
                     if ev.key in (pygame.K_ESCAPE, pygame.K_q):
                         running = False
                         break
+                        
+                if ev.type==pygame.KEYDOWN:                 
+                    if ev.key==pygame.K_y:
+                        r_pulse+=1
+                        print(r_pulse)
+                        show_info()
+                    elif ev.key==pygame.K_h:
+                        r_pulse-=1
+                        print(r_pulse)
+                        show_info()
+                    elif ev.key==pygame.K_u:
+                        nr_pulse+=1
+                        print(nr_pulse)
+                        show_info()
+                    elif ev.key==pygame.K_j:
+                        nr_pulse-=1
+                        print(nr_pulse)
+                        show_info()
+                        
             if not running:
                 break
 
@@ -592,6 +646,8 @@ def run(args):
                     active_fingers.add(ev.finger_id)
                 elif FINGERUP is not None and ev.type == FINGERUP:
                     active_fingers.discard(ev.finger_id)
+
+
 
                 # 位置取得ヘルパ
                 def _get_xy(e):
@@ -631,10 +687,21 @@ def run(args):
                                 # ==== 成功（現在の正解をタッチ）====
                                 ok = True
                                 try:
-                                    for i in range (args.pulsecount):
-                                        ttl.pulse()
-                                        time.sleep(0.28)
+                                    if target_is_r == True:
+                                        for i in range(r_pulse):
+                                            ttl.pulse()
+                                            time.sleep(0.28)
+                                    else:
+                                        for i in range(nr_pulse):
+                                            ttl.pulse()
+                                            time.sleep(0.28)
                                 except Exception as e:
+                                    if target_is_r == True:
+                                        for i in range(r_pulse):
+                                            print("r_pulse")
+                                    else:
+                                        for i in range(nr_pulse):
+                                            print("nr_pulse")
                                     print(f"[ERROR] TTL 失敗: {e}", file=sys.stderr)
                                     ok = False
                                 try:
@@ -896,6 +963,8 @@ def parse_args():
     p.add_argument("--info", action="store_true")
 
     p.add_argument("--pulsecount", type=int, default=1, help="連射数")
+    p.add_argument("--r_pulse", type=int, help="r連射数")
+    p.add_argument("--nr_pulse", type=int, help="nr連射数")
     p.add_argument("--name", type=str, default='', help="logの名前を指定")
     p.add_argument("--testmode", action="store_true")
     
