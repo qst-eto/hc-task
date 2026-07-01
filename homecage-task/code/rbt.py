@@ -273,13 +273,14 @@ def run(args):
             "sliding_n","sliding_correct","sliding_acc",
             "correction_mode","is_correction_trial",
             # ==== REVERSAL: 追加列 ====
-            "hi_label",                 # r / rn（rn=逆転後にnrが正解）
+            #"hi_label",                 # r / rn（rn=逆転後にnrが正解）
             "reversal_count_in_set",
             "reversals_per_set",
             "reversal_event",               # REVERSAL_TRIGGERED / ADVANCE_TO_NEXT_SET_AFTER_REVERSALS など
             "reversal_idx",
             "reversal_trigger_acc",
-            "probability",
+            "r_probability",
+            "nr_probability",
             "reward", #1はあり、0はなし
             "chosen"
             
@@ -393,13 +394,14 @@ def run(args):
                 "correction_mode": 1 if correction_mode_enabled else 0,
                 "is_correction_trial": 1 if current_trial_is_correction else 0,
                 # ==== REVERSAL: 追加ログ ====
-                "hi_label": "r" if target_is_r else "rn",
+                #"hi_label": "r" if target_is_r else "rn",
                 "reversal_count_in_set": reversal_count_in_set,
                 "reversals_per_set": reversals_per_set,
                 "reversal_event": "",
                 "reversal_idx": "",
                 "reversal_trigger_acc": "",
-                "probability": args.prob,
+                "r_probability": args.prob[0] if target_is_r else args.prob[1],
+                "nr_probability": args.prob[1] if target_is_r else args.prob[0],
                 "reward":reward,
                 "chosen":chosen
             }
@@ -648,8 +650,8 @@ def run(args):
             iti_end_time = time.perf_counter() + iti_ms / 1000.0
             draw(stim_on=False)
                                 
-                                #state = STATE_SHOW この2つをオンにするとITIを飛ばせる
-                                #draw(stim_on=True)
+            #state = STATE_SHOW #この2つをオンにするとITIを飛ばせる
+            #draw(stim_on=True)
                                 
         def fail_f():
             nonlocal failures, state, iti_end_time, trial_index_global, trial_index_in_set, chosen
@@ -676,6 +678,10 @@ def run(args):
             touch_during_iti = mouse_down or bool(active_fingers)
             iti_end_time = time.perf_counter() + iti_ms / 1000.0
             draw(stim_on=False)
+            
+            #state = STATE_SHOW #この2つをオンにするとITIを飛ばせる
+            #draw(stim_on=True)
+                                
 
         # 初回配置
         place_new_trial()
