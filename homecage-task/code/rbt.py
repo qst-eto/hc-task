@@ -185,11 +185,11 @@ def run(args):
             left_cx  = (sw // 2) - center_offset
             right_cx = (sw // 2) + center_offset
 
-            left_img_rect  = pygame.Rect(left_cx - stim_w // 2,  cy - stim_h // 2,  stim_w,  stim_h)
-            right_img_rect = pygame.Rect(right_cx - stim_w // 2, cy - stim_h // 2, stim_w,  stim_h)
+            left_img_rect  = pygame.Rect(left_cx - stim_w // 2,  cy - stim_h // 2 + args.sth,  stim_w,  stim_h)
+            right_img_rect = pygame.Rect(right_cx - stim_w // 2, cy - stim_h // 2 + args.sth, stim_w,  stim_h)
 
-            left_plate_rect  = pygame.Rect(left_cx - plate_w // 2,  cy - plate_h // 2,  plate_w,  plate_h)
-            right_plate_rect = pygame.Rect(right_cx - plate_w // 2, cy - plate_h // 2, plate_w,  plate_h)
+            left_plate_rect  = pygame.Rect(left_cx - plate_w // 2,  cy - plate_h // 2 + args.sth,  plate_w,  plate_h)
+            right_plate_rect = pygame.Rect(right_cx - plate_w // 2, cy - plate_h // 2 + args.sth, plate_w,  plate_h)
 
             return left_img_rect, right_img_rect, left_plate_rect, right_plate_rect
 
@@ -273,12 +273,16 @@ def run(args):
             "sliding_n","sliding_correct","sliding_acc",
             "correction_mode","is_correction_trial",
             # ==== REVERSAL: 追加列 ====
-            "target_label",                 # r / rn（rn=逆転後にnrが正解）
+            "hi_label",                 # r / rn（rn=逆転後にnrが正解）
             "reversal_count_in_set",
             "reversals_per_set",
             "reversal_event",               # REVERSAL_TRIGGERED / ADVANCE_TO_NEXT_SET_AFTER_REVERSALS など
             "reversal_idx",
-            "reversal_trigger_acc"
+            "reversal_trigger_acc",
+            "probability",
+            "reward", #1はあり、0はなし
+            "chosen"
+            
         ]
         csv_f = out_path.open("w", newline="", encoding="utf-8")
         csv_w = csv.DictWriter(csv_f, fieldnames=fieldnames)
@@ -291,6 +295,12 @@ def run(args):
         failures = 0
         trial_index_global = 0
         trial_index_in_set = 0
+        
+        hi=0
+        low=0
+        choose_r=0
+        choose_nr=0
+        
         
         if args.r_pulse:
             r_pulse = args.r_pulse
@@ -336,7 +346,7 @@ def run(args):
         right_surf = None
 
         # append_log: 現状の配置・刺激情報を含めて行追加
-        def append_log(event_name, x, y, iti_ms, extra=None):
+        def append_log(event_name, x, y, iti_ms, reward, chosen, extra=None):
             nonlocal write_count
             nowp = time.perf_counter()
             rel = nowp - t0
@@ -383,12 +393,15 @@ def run(args):
                 "correction_mode": 1 if correction_mode_enabled else 0,
                 "is_correction_trial": 1 if current_trial_is_correction else 0,
                 # ==== REVERSAL: 追加ログ ====
-                "target_label": "r" if target_is_r else "rn",
+                "hi_label": "r" if target_is_r else "rn",
                 "reversal_count_in_set": reversal_count_in_set,
                 "reversals_per_set": reversals_per_set,
                 "reversal_event": "",
                 "reversal_idx": "",
-                "reversal_trigger_acc": ""
+                "reversal_trigger_acc": "",
+                "probability": args.prob,
+                "reward":reward,
+                "chosen":chosen
             }
             if extra is not None:
                 row.update(extra)
@@ -433,6 +446,9 @@ def run(args):
                         f"r_pulse={r_pulse} "
                         f"nr_pulse={nr_pulse} "
                         f"count={len(window)} "
+                        f"choose_r={choose_r}"
+                        f"choose_nr={choose_nr}"
+
                         )
                 screen.blit(font.render(txt1, True, (220, 220, 220)), (20, 20))
             pygame.display.flip()
@@ -455,6 +471,8 @@ def run(args):
                         f"r_pulse={r_pulse} "
                         f"nr_pulse={nr_pulse} "
                         f"count={len(window)} "
+                        f"choose_r={choose_r}"
+                        f"choose_nr={choose_nr}"
                         )
                 screen.blit(font.render(txt1, True, (220, 220, 220)), (20, 20))
             pygame.display.flip()
@@ -480,16 +498,17 @@ def run(args):
             # 矩形群を再計算（画面リサイズ等の変化にも対応）
             left_rect, right_rect, left_plate_rect, right_plate_rect = compute_rects()
 
-            append_log("TRIAL_PLACED", -1, -1, 0)
+            #append_log("TRIAL_PLACED", -1, -1, 0)
 
         # ==== REVERSAL: ユーティリティ ====
         def log_reversal_event(kind: str, idx: int, acc_val: float):
             # kind: "REVERSAL_TRIGGERED" / "ADVANCE_TO_NEXT_SET_AFTER_REVERSALS"
-            append_log(kind, -1, -1, 0, extra={
-                "reversal_event": kind,
-                "reversal_idx": idx,
-                "reversal_trigger_acc": f"{acc_val:.6f}"
-            })
+            #append_log(kind, -1, -1, 0, extra={
+            #    "reversal_event": kind,
+            #    "reversal_idx": idx,
+            #    "reversal_trigger_acc": f"{acc_val:.6f}"
+            #})
+            return 
 
         def perform_reversal(acc_val: float):
             """r<->nr の正解関係を反転。窓をリセット。コレクション状態は解除。"""
@@ -515,7 +534,7 @@ def run(args):
             correction_active = False
             correction_left_is_r = None
 
-            log_reversal_event("REVERSAL_TRIGGERED", reversal_count_in_set, acc_val)
+            #log_reversal_event("REVERSAL_TRIGGERED", reversal_count_in_set, acc_val)
             print(f"[INFO] Reversal #{reversal_count_in_set} in {stim_pairs[current_set_idx].label}: target={'r' if target_is_r else 'nr'} (acc={acc_val:.3f} >= {acc_threshold:.3f})")
 
         def advance_to_next_set(acc_val: float, reason: str):
@@ -577,9 +596,92 @@ def run(args):
                             perform_reversal(acc)  # ここで reversal_count_in_set == reversals_per_set
                             advance_to_next_set(acc, "ADVANCE_TO_NEXT_SET_AFTER_REVERSALS")
 
+        def success_f():
+            nonlocal state, iti_end_time, successes ,trial_index_global, trial_index_in_set, chosen
+            nonlocal touch_during_iti, correction_active, correction_mode_enabled, current_trial_is_correction, correction_left_is_r
+            ok = True
+            try:
+                if target_is_r == True:
+                    for i in range(r_pulse):
+                        ttl.pulse()
+                        time.sleep(0.28)
+                else:
+                    for i in range(nr_pulse):
+                        ttl.pulse()
+                        time.sleep(0.28)
+            except Exception as e:
+                if target_is_r == True:
+                    for i in range(r_pulse):
+                        print("r_pulse")
+                else:
+                    for i in range(nr_pulse):
+                        print("nr_pulse")
+                print(f"[ERROR] TTL 失敗: {e}", file=sys.stderr)
+                ok = False
+            try:
+                if beep is not None:
+                    beep.play()
+            except Exception:
+                pass
+
+            iti_ms = sample_iti("correct")
+            append_log("TOUCH_TARGET_CORRECT" if ok else "TOUCH_TARGET_CORRECT_TTL_FAIL", x, y, iti_ms,1,chosen,
+                        extra={"hit_area": hit_area,
+                               "trial_outcome": "success",
+                               "iti_kind": "correct"})
+            if ok:
+                successes += 1
+            trial_is_correction = current_trial_is_correction  # 現試行の属性を退避
+            # コレクション解除（成功で解除）
+            if correction_mode_enabled and correction_active:
+                correction_active = False
+                correction_left_is_r = None
+
+            trial_index_global += 1
+            trial_index_in_set += 1
+            # 成功時は遷移判定を許可
+            update_window_and_maybe_transition(True, trial_is_correction, allow_transition=True)
+
+            state = STATE_ITI
+                                
+            touch_during_iti = mouse_down or bool(active_fingers)
+            iti_end_time = time.perf_counter() + iti_ms / 1000.0
+            draw(stim_on=False)
+                                
+                                #state = STATE_SHOW この2つをオンにするとITIを飛ばせる
+                                #draw(stim_on=True)
+                                
+        def fail_f():
+            nonlocal failures, state, iti_end_time, trial_index_global, trial_index_in_set, chosen
+            nonlocal touch_during_iti, correction_active, current_trial_is_correction, correction_mode_enabled, correction_left_is_r
+            failures += 1
+            iti_ms = sample_iti("error")
+            append_log("TOUCH_NONTARGET_ERROR", x, y, iti_ms, 0,chosen,
+                extra={"hit_area": hit_area,
+                       "trial_outcome": "error",
+                       "fail_reason": "touched_non_target",
+                       "iti_kind": "error"})
+            trial_is_correction = current_trial_is_correction
+            # 以降は同じ左右配置を維持
+            if correction_mode_enabled:
+                correction_active = True
+                correction_left_is_r = left_is_r
+
+            trial_index_global += 1
+            trial_index_in_set += 1
+            # 失敗時はコレクション有効なら遷移禁止（従来仕様を踏襲）
+            update_window_and_maybe_transition(False, trial_is_correction,
+                                                allow_transition=((not correction_mode_enabled)+args.mode0))
+            state = STATE_ITI
+            touch_during_iti = mouse_down or bool(active_fingers)
+            iti_end_time = time.perf_counter() + iti_ms / 1000.0
+            draw(stim_on=False)
+
         # 初回配置
         place_new_trial()
         draw(stim_on=True)
+
+
 
         running = True
         iti_end_time = 0.0
@@ -682,95 +784,51 @@ def run(args):
 
                             # ==== REVERSAL: 現在の正解に合わせて判定 ====
                             touched_is_target = (touched_is_r == target_is_r)
-
+                            
+                            print(args.prob[0])
+                            print(args.prob[1])
+                            
+                            
                             if touched_is_target:
-                                # ==== 成功（現在の正解をタッチ）====
-                                ok = True
-                                try:
-                                    if target_is_r == True:
-                                        for i in range(r_pulse):
-                                            ttl.pulse()
-                                            time.sleep(0.28)
-                                    else:
-                                        for i in range(nr_pulse):
-                                            ttl.pulse()
-                                            time.sleep(0.28)
-                                except Exception as e:
-                                    if target_is_r == True:
-                                        for i in range(r_pulse):
-                                            print("r_pulse")
-                                    else:
-                                        for i in range(nr_pulse):
-                                            print("nr_pulse")
-                                    print(f"[ERROR] TTL 失敗: {e}", file=sys.stderr)
-                                    ok = False
-                                try:
-                                    if beep is not None:
-                                        beep.play()
-                                except Exception:
-                                    pass
-
-                                iti_ms = sample_iti("correct")
-                                append_log("TOUCH_TARGET_CORRECT" if ok else "TOUCH_TARGET_CORRECT_TTL_FAIL", x, y, iti_ms,
-                                           extra={"hit_area": hit_area,
-                                                  "trial_outcome": "success",
-                                                  "iti_kind": "correct"})
-                                if ok:
-                                    successes += 1
-                                trial_is_correction = current_trial_is_correction  # 現試行の属性を退避
-                                # コレクション解除（成功で解除）
-                                if correction_mode_enabled and correction_active:
-                                    correction_active = False
-                                    correction_left_is_r = None
-
-                                trial_index_global += 1
-                                trial_index_in_set += 1
-                                # 成功時は遷移判定を許可
-                                update_window_and_maybe_transition(True, trial_is_correction, allow_transition=True)
-
-                                state = STATE_ITI
+                                hi+=1
                                 
-                                touch_during_iti = mouse_down or bool(active_fingers)
-                                iti_end_time = time.perf_counter() + iti_ms / 1000.0
-                                draw(stim_on=False)
-                                
-                                #state = STATE_SHOW この2つをオンにするとITIを飛ばせる
-                                #draw(stim_on=True)
+                                if target_is_r:
+                                    choose_r += 1
+                                    chosen="r"
+                                else:
+                                    choose_nr += 1
+                                    chosen="nr"
 
+                                if args.prob[0]>=random.random():
+                                    success_f()
+                                else:
+                                    fail_f()
                             else:
-                                # ==== 失敗（現在の不正解をタッチ）====
-                                failures += 1
-                                iti_ms = sample_iti("error")
-                                append_log("TOUCH_NONTARGET_ERROR", x, y, iti_ms,
-                                           extra={"hit_area": hit_area,
-                                                  "trial_outcome": "error",
-                                                  "fail_reason": "touched_non_target",
-                                                  "iti_kind": "error"})
-                                trial_is_correction = current_trial_is_correction
-                                # 以降は同じ左右配置を維持
-                                if correction_mode_enabled:
-                                    correction_active = True
-                                    correction_left_is_r = left_is_r
-
-                                trial_index_global += 1
-                                trial_index_in_set += 1
-                                # 失敗時はコレクション有効なら遷移禁止（従来仕様を踏襲）
-                                update_window_and_maybe_transition(False, trial_is_correction,
-                                                                    allow_transition=((not correction_mode_enabled)+args.mode0))
-
-                                state = STATE_ITI
-                                touch_during_iti = mouse_down or bool(active_fingers)
-                                iti_end_time = time.perf_counter() + iti_ms / 1000.0
-                                draw(stim_on=False)
+                                low+=1
+                                
+                                if target_is_r:
+                                    
+                                    choose_nr += 1
+                                    chosen="nr"
+                                
+                                else:
+                                    
+                                    choose_r += 1
+                                    chosen="r"
+                                    
+                                if args.prob[1]>=random.random():
+                                    success_f()
+                                else:
+                                    fail_f()
 
                         else:
                             # ==== プレート外タッチ ====
                             outside_touches_in_trial += 1
-                            append_log("TOUCH_OUTSIDE", x, y, 0, extra={"hit_area": "outside"})
+                            #append_log("TOUCH_OUTSIDE", x, y, 0, extra={"hit_area": "outside"})
                             if outside_touches_in_trial >= max_outside_before_fail:
                                 failures += 1
                                 iti_ms = sample_iti("error")
-                                append_log("FAIL_OUTSIDE_LIMIT", x, y, iti_ms,
+                                append_log("FAIL_OUTSIDE_LIMIT", x, y, iti_ms, 0,
                                            extra={"hit_area": "outside",
                                                   "trial_outcome": "error",
                                                   "fail_reason": "outside_limit",
@@ -800,12 +858,12 @@ def run(args):
                         x, y = xy
                         if left_plate_rect.inflate(2*hit_margin_px, 2*hit_margin_px).collidepoint((x, y)):
                             hit_area = "left_core" if left_plate_rect.collidepoint((x, y)) else "left_margin"
-                            append_log("TOUCH_ITI_LEFT", x, y, 0, extra={"hit_area": hit_area})
+                            #append_log("TOUCH_ITI_LEFT", x, y, 0, extra={"hit_area": hit_area})
                         elif right_plate_rect.inflate(2*hit_margin_px, 2*hit_margin_px).collidepoint((x, y)):
                             hit_area = "right_core" if right_plate_rect.collidepoint((x, y)) else "right_margin"
-                            append_log("TOUCH_ITI_RIGHT", x, y, 0, extra={"hit_area": hit_area})
-                        else:
-                            append_log("TOUCH_ITI_OUTSIDE", x, y, 0, extra={"hit_area": "outside"})
+                            #append_log("TOUCH_ITI_RIGHT", x, y, 0, extra={"hit_area": hit_area})
+                        #else:
+                            #append_log("TOUCH_ITI_OUTSIDE", x, y, 0, extra={"hit_area": "outside"})
                         draw(stim_on=False)
 
                 elif state == STATE_WAIT_RELEASE:
@@ -825,8 +883,8 @@ def run(args):
                     wait_release_enter_t = now
                     release_clear_start_t = None
                     require_release_dwell = touch_during_iti and (min_release_after_iti_touch_s > 0)
-                    if require_release_dwell:
-                        append_log("RELEASE_DWELL_WILL_REQUIRE", -1, -1, 0)
+                    #if require_release_dwell:
+                        #append_log("RELEASE_DWELL_WILL_REQUIRE", -1, -1, 0)
 
             if state == STATE_WAIT_RELEASE:
                 
@@ -835,11 +893,11 @@ def run(args):
                     if no_touch_now:
                         if release_clear_start_t is None:
                             release_clear_start_t = now
-                            append_log("RELEASE_DWELL_START", -1, -1, 0)
+                            #append_log("RELEASE_DWELL_START", -1, -1, 0)
                         else:
                             elapsed = now - release_clear_start_t
                             if elapsed >= min_release_after_iti_touch_s:
-                                append_log("RELEASE_DWELL_OK", -1, -1, 0)
+                                #append_log("RELEASE_DWELL_OK", -1, -1, 0)
                                 state = STATE_SHOW
                                 require_release_dwell = False
                                 touch_during_iti = False
@@ -847,8 +905,8 @@ def run(args):
                                 place_new_trial()
                                 draw(stim_on=True)
                     else:
-                        if release_clear_start_t is not None:
-                            append_log("RELEASE_DWELL_RESET", -1, -1, 0)
+                        #if release_clear_start_t is not None:
+                            #append_log("RELEASE_DWELL_RESET", -1, -1, 0)
                         release_clear_start_t = None
                 else:
                     if no_touch_now:
@@ -865,7 +923,7 @@ def run(args):
                         mouse_down = False
                         if require_release_dwell and release_clear_start_t is None:
                             release_clear_start_t = now
-                            append_log("RELEASE_DWELL_START_FORCED", -1, -1, 0)
+                            #append_log("RELEASE_DWELL_START_FORCED", -1, -1, 0)
                         elif not require_release_dwell:
                             state = STATE_SHOW
                             touch_during_iti = False
@@ -970,6 +1028,9 @@ def parse_args():
     
     p.add_argument("--random_sliding", type=int, nargs=2)
     p.add_argument("--mode0", action="store_true")
+    p.add_argument("--sth", type=float, default=0, help="画像の高さ調整")
+    
+    p.add_argument("--prob", type=float, nargs=2, default=(1,0))
 
     return p.parse_args()
 
