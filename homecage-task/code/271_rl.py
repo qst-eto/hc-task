@@ -185,11 +185,11 @@ def run(args):
             left_cx  = (sw // 2) - center_offset
             right_cx = (sw // 2) + center_offset
 
-            left_img_rect  = pygame.Rect(left_cx - stim_w // 2,  cy - stim_h // 2,  stim_w,  stim_h)
-            right_img_rect = pygame.Rect(right_cx - stim_w // 2, cy - stim_h // 2, stim_w,  stim_h)
+            left_img_rect  = pygame.Rect(left_cx - stim_w // 2,  cy - stim_h // 2 + args.sth,  stim_w,  stim_h)
+            right_img_rect = pygame.Rect(right_cx - stim_w // 2, cy - stim_h // 2 + args.sth, stim_w,  stim_h)
 
-            left_plate_rect  = pygame.Rect(left_cx - plate_w // 2,  cy - plate_h // 2,  plate_w,  plate_h)
-            right_plate_rect = pygame.Rect(right_cx - plate_w // 2, cy - plate_h // 2, plate_w,  plate_h)
+            left_plate_rect  = pygame.Rect(left_cx - plate_w // 2,  cy - plate_h // 2 + args.sth,  plate_w,  plate_h)
+            right_plate_rect = pygame.Rect(right_cx - plate_w // 2, cy - plate_h // 2 + args.sth, plate_w,  plate_h)
 
             return left_img_rect, right_img_rect, left_plate_rect, right_plate_rect
 
@@ -970,6 +970,7 @@ def parse_args():
     
     p.add_argument("--random_sliding", type=int, nargs=2)
     p.add_argument("--mode0", action="store_true")
+    p.add_argument("--sth", type=float, default=0, help="画像の高さ調整")
 
     return p.parse_args()
 
