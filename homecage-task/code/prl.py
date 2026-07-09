@@ -463,7 +463,6 @@ def run(args):
                     "high_label": high_label,
                     "p_high": info["p_high"],
                     "p_low": info["p_low"],
-                    "reverse_high": reverse_high,
                 })
 
             if extra is not None:
@@ -556,6 +555,7 @@ def run(args):
                 "global_trial": schedule_trial_index,
                 "info": info,
                 "pair": cur_pair,
+                "reverse_high": reverse_high,
                 "left_label": "r" if left_is_r else "nr",
                 "right_label": "nr" if left_is_r else "r",
                 "left_image": cur_pair.r_path.name if left_is_r else cur_pair.nr_path.name,
