@@ -602,6 +602,16 @@ def run(args):
             nonlocal state, iti_end_time, successes ,trial_index_global, trial_index_in_set, chosen
             nonlocal touch_during_iti, correction_active, correction_mode_enabled, current_trial_is_correction, correction_left_is_r
             ok = True
+            
+            screen.fill((0,0,0))
+            pygame.display.flip()
+            
+            try:
+                if beep is not None:
+                    beep.play()
+            except Exception:
+                pass
+            
             try:
                 if target_is_r == True:
                     for i in range(r_pulse):
@@ -620,11 +630,7 @@ def run(args):
                         print("nr_pulse")
                 print(f"[ERROR] TTL 失敗: {e}", file=sys.stderr)
                 ok = False
-            try:
-                if beep is not None:
-                    beep.play()
-            except Exception:
-                pass
+
 
             iti_ms = sample_iti("correct")
             append_log("TOUCH_TARGET_CORRECT" if ok else "TOUCH_TARGET_CORRECT_TTL_FAIL", x, y, iti_ms,1,chosen,

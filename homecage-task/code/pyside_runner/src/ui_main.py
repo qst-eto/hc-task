@@ -102,30 +102,35 @@ class ScriptWorker(QThread):
 
     def run(self):
         rc = 1
-        # 実行環境の退避
+
         old_cwd = Path.cwd()
         old_argv = sys.argv[:]
+        old_sys_path = sys.path.copy()      # ←追加
         old_stdout, old_stderr = sys.stdout, sys.stderr
 
-        # 標準出力/エラーのフック
         out_stream = _EmittingStream(self.output.emit)
         err_stream = _EmittingStream(self.output.emit)
 
         try:
-            # カレントをスクリプトの場所へ
             os.chdir(self.working_dir)
 
-            # sys.argv を対象スクリプト想定に差し替え
+        # ←追加
+            script_dir = str(self.script_path.parent.resolve())
+
+            if script_dir not in sys.path:
+                sys.path.insert(0, script_dir)
+
             sys.argv = [str(self.script_path)] + self.argv
 
-            # 出力フック（print / logging を拾う）
             sys.stdout = out_stream
             sys.stderr = err_stream
 
-            # 実行
             self._emit(f"[INFO] 実行開始: {self.script_path}")
-            runpy.run_path(str(self.script_path), run_name="__main__")
-            # キャンセル要求の有無に関係なく、ここまで来れば正常終了扱い
+
+            runpy.run_path(
+                str(self.script_path),
+                run_name="__main__"
+            )
             rc = 0
 
         except SystemExit as e:
@@ -147,6 +152,7 @@ class ScriptWorker(QThread):
             sys.stdout = old_stdout
             sys.stderr = old_stderr
             sys.argv = old_argv
+            sys.path = old_sys_path
             os.chdir(old_cwd)
 
         self.finished.emit(rc)
