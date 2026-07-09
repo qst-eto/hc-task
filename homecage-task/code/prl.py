@@ -98,12 +98,22 @@ def load_or_generate_schedule(args):
     return sched
 
 
-def resolve_trial(sched, global_trial: int, chosen_label: str, reward_rng) -> Dict:
+def resolve_trial(
+    sched,
+    global_trial: int,
+    chosen_label: str,
+    reward_rng,
+    reverse_high=False,
+) -> Dict:
     if chosen_label not in ("r", "nr"):
         raise ValueError("chosen_label must be 'r' or 'nr'")
 
-    info = sched.lookup(global_trial)
+    info = dict(sched.lookup(global_trial))
     high_label = info["high_label"]
+
+    if reverse_high:
+        high_label = "nr" if high_label == "r" else "r"
+        info["high_label"] = high_label
     p_high = info["p_high"]
     p_low = info["p_low"]
     is_correct = chosen_label == high_label
@@ -453,6 +463,7 @@ def run(args):
                     "high_label": high_label,
                     "p_high": info["p_high"],
                     "p_low": info["p_low"],
+                    "reverse_high": reverse_high,
                 })
 
             if extra is not None:
@@ -511,6 +522,16 @@ def run(args):
                 return False
 
             info = dict(sched.lookup(schedule_trial_index))
+            
+            reverse_high = (
+            args.reverse_high_with_block
+            and (info["block_index"] % 2 == 1)
+            )
+
+            if reverse_high:
+                info["high_label"] = (
+                "nr" if info["high_label"] == "r" else "r"
+            )
             
             if args.reverse_high_with_block:
                 if info["trial_in_block"] == 0 and info["block_index"] > 0:
@@ -635,7 +656,13 @@ def run(args):
                                 hit_area = "right_core" if right_plate_rect.collidepoint((x, y)) else "right_margin"
                                 chosen_label = "nr" if left_is_r else "r"
 
-                            result = resolve_trial(sched, current_context["global_trial"], chosen_label, reward_rng)
+                            result = resolve_trial(
+                                sched,
+                                current_context["global_trial"],
+                                chosen_label,
+                                reward_rng,
+                                reverse_high=current_context["reverse_high"],
+                            )
                             reward_won = bool(result["reward_won"])
                             reward_delivered = 0
                             ttl_ok = True
