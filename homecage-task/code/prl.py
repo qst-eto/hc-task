@@ -379,8 +379,6 @@ def run(args):
         reward_count = 0
         outside_failures = 0
         schedule_trial_index = 0
-        
-        high_label_offset = 0
 
         correction_mode_enabled = bool(args.correction_mode)
         correction_active = False
@@ -511,7 +509,6 @@ def run(args):
             pygame.display.flip()
 
         def place_new_trial():
-            nonlocal high_label_offset
             
             nonlocal left_is_r, left_surf, right_surf
             nonlocal left_rect, right_rect, left_plate_rect, right_plate_rect
@@ -531,13 +528,6 @@ def run(args):
                 info["high_label"] = (
                 "nr" if info["high_label"] == "r" else "r"
             )
-            
-            if args.reverse_high_with_block:
-                if info["trial_in_block"] == 0 and info["block_index"] > 0:
-                    high_label_offset ^= 1
-
-                if high_label_offset:
-                    info["high_label"] = "nr" if info["high_label"] == "r" else "r"
             
             cur_pair = pair_for_block(info["block_index"])
             current_trial_is_correction = correction_mode_enabled and correction_active
