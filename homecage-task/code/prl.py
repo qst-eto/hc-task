@@ -849,7 +849,7 @@ def parse_args(argv: Optional[List[str]] = None):
     p.add_argument("--block-len-trials", type=int, default=80)
     p.add_argument("--reversal-min-trial", type=int, default=30)
     p.add_argument("--reversal-max-trial", type=int, default=50)
-    p.add_argument("--schedule-set", choices=["80-20", "70-30", "60-40", "mixed"], default="80-20")
+    p.add_argument("--schedule-set", choices=["80-20", "70-30", "60-40","90-10", "mixed"], default="80-20")
     p.add_argument("--initial-high-label", choices=["r", "nr", "random"], default="r")
 
     p.add_argument("--fullscreen", action="store_true")
