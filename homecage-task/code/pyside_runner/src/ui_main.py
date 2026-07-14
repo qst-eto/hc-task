@@ -41,7 +41,7 @@ except Exception:
 
 from argparse_ast import extract_args_from_source, ARG_TYPES
 
-APP_NAME = 'PyScriptRunner'
+APP_NAME = Path(sys.executable).stem
 ORG_NAME = 'PSR'  # QSettings 識別
 
 
